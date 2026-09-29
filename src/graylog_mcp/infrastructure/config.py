@@ -46,6 +46,12 @@ class Settings:
             raise ConfigError(f"missing required environment variable(s): {', '.join(missing)}")
         if not base_url.startswith(("http://", "https://")):
             raise ConfigError("GRAYLOG_BASE_URL must start with http:// or https://")
+        allow_insecure_http = _flag(env, "GRAYLOG_ALLOW_INSECURE_HTTP", default=False)
+        if base_url.startswith("http://") and not allow_insecure_http:
+            raise ConfigError(
+                "GRAYLOG_BASE_URL must use https://; set GRAYLOG_ALLOW_INSECURE_HTTP=true "
+                "only for local development"
+            )
 
         raw_timeout = env.get("GRAYLOG_TIMEOUT_SECONDS", "").strip()
         try:

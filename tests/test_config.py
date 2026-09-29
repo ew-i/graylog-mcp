@@ -19,6 +19,21 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(s.verify_tls)
         self.assertEqual(s.timeout_seconds, 5.0)
 
+    def test_http_requires_explicit_development_override(self):
+        with self.assertRaisesRegex(ConfigError, "GRAYLOG_ALLOW_INSECURE_HTTP"):
+            Settings.from_env(
+                {**BASE, "GRAYLOG_BASE_URL": "http://localhost:9000"}
+            )
+
+        settings = Settings.from_env(
+            {
+                **BASE,
+                "GRAYLOG_BASE_URL": "http://localhost:9000",
+                "GRAYLOG_ALLOW_INSECURE_HTTP": "true",
+            }
+        )
+        self.assertEqual(settings.base_url, "http://localhost:9000")
+
     def test_missing_values_are_all_reported(self):
         with self.assertRaises(ConfigError) as ctx:
             Settings.from_env({})
@@ -28,6 +43,7 @@ class SettingsTest(unittest.TestCase):
     def test_invalid_values(self):
         for override in (
             {"GRAYLOG_BASE_URL": "gl.example"},
+            {"GRAYLOG_ALLOW_INSECURE_HTTP": "maybe"},
             {"GRAYLOG_VERIFY_TLS": "maybe"},
             {"GRAYLOG_TIMEOUT_SECONDS": "soon"},
             {"GRAYLOG_TIMEOUT_SECONDS": "0"},

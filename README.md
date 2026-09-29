@@ -7,32 +7,32 @@ alerts, saved searches, cluster health and configuration.
 
 ## Tools
 
-| Area | Tool | What it does | Needs |
-|---|---|---|---|
-| Search | `cluster_status` | Version, node, timezone, processing state | |
-| | `browse_streams` | Streams you may query, with IDs — call first | |
-| | `find_recent_logs` / `find_logs_between` | Message search, relative or absolute window | |
-| | `read_log_message` | One message in full | |
-| | `rank_field_values` | Top values from a sample of ≤1000 newest matches | |
-| | `discover_fields` | Field names seen in recent messages | |
-| Analysis | `count_matches` | Number of hits only | |
-| | `count_over_time` | Histogram, optionally split by a field | 5.1+ |
-| | `exact_field_counts` | Exact top values, counted server-side | 5.1+ |
-| | `compare_windows` | Now vs. earlier window; totals and per-value changes | per-value: 5.1+ |
-| | `field_stats` | count/avg/min/max/sum/percentiles of a numeric field | 5.1+ |
-| | `message_context` | Messages just before/after one message (same source/pod) | |
-| Alerts | `recent_alerts` | Alerts/events raised in a window | events read |
-| | `alert_definitions` | What each event definition checks and how often | events read |
-| Saved views | `saved_searches` / `dashboards` | List them | view read |
-| | `run_saved_search` | Run a saved search's query, stream and range | view read |
-| Operations | `input_status` | Inputs and their per-node state | inputs read |
-| | `throughput` | msg/s in/out, buffer usage, journal backlog | metrics read |
-| | `system_notifications` | Graylog's own warnings, urgent first | notifications read |
-| | `cluster_nodes` | Nodes, leader, lifecycle, health | cluster read |
-| Configuration | `stream_rules` | A stream's routing rules in plain words | stream read |
-| | `pipeline_rules` | Pipelines (per stream), stages and rule source | pipeline read |
-| | `index_sets` | Rotation/retention, i.e. how far back you can search | index sets read |
-| | `lookup_tables` / `lookup_value` | Resolve a key via a lookup table | lookup tables read |
+| Area          | Tool                                     | What it does                                             | Needs              |
+|---------------|------------------------------------------|----------------------------------------------------------|--------------------|
+| Search        | `cluster_status`                         | Version, node, timezone, processing state                |                    |
+|               | `browse_streams`                         | Streams you may query, with IDs — call first             |                    |
+|               | `find_recent_logs` / `find_logs_between` | Message search, relative or absolute window              |                    |
+|               | `read_log_message`                       | One message in full                                      |                    |
+|               | `rank_field_values`                      | Top values from a sample of ≤1000 newest matches         |                    |
+|               | `discover_fields`                        | Field names seen in recent messages                      |                    |
+| Analysis      | `count_matches`                          | Number of hits only                                      |                    |
+|               | `count_over_time`                        | Histogram, optionally split by a field                   | 5.1+               |
+|               | `exact_field_counts`                     | Exact top values, counted server-side                    | 5.1+               |
+|               | `compare_windows`                        | Now vs. earlier window; totals and per-value changes     | per-value: 5.1+    |
+|               | `field_stats`                            | count/avg/min/max/sum/percentiles of a numeric field     | 5.1+               |
+|               | `message_context`                        | Messages just before/after one message (same source/pod) |                    |
+| Alerts        | `recent_alerts`                          | Alerts/events raised in a window                         | events read        |
+|               | `alert_definitions`                      | What each event definition checks and how often          | events read        |
+| Saved views   | `saved_searches` / `dashboards`          | List them                                                | view read          |
+|               | `run_saved_search`                       | Run a saved search's query, stream and range             | view read          |
+| Operations    | `input_status`                           | Inputs and their per-node state                          | inputs read        |
+|               | `throughput`                             | msg/s in/out, buffer usage, journal backlog              | metrics read       |
+|               | `system_notifications`                   | Graylog's own warnings, urgent first                     | notifications read |
+|               | `cluster_nodes`                          | Nodes, leader, lifecycle, health                         | cluster read       |
+| Configuration | `stream_rules`                           | A stream's routing rules in plain words                  | stream read        |
+|               | `pipeline_rules`                         | Pipelines (per stream), stages and rule source           | pipeline read      |
+|               | `index_sets`                             | Rotation/retention, i.e. how far back you can search     | index sets read    |
+|               | `lookup_tables` / `lookup_value`         | Resolve a key via a lookup table                         | lookup tables read |
 
 **5.1+** tools use Graylog's Search Scripting API. On older servers they return
 `{"kind": "Unsupported", ...}`; the rest keep working. **Needs** lists the token
@@ -69,14 +69,13 @@ tests/              domain, services (with fakes), adapters (MockTransport), MCP
 
 ## Configuration
 
-| Variable                  | Required | Default |
-|---------------------------|----------|---------|
-| `GRAYLOG_BASE_URL`        | yes      |         |
-| `GRAYLOG_API_TOKEN`       | yes      |         |
-| `GRAYLOG_VERIFY_TLS`      | no       | `true`  |
-| `GRAYLOG_TIMEOUT_SECONDS` | no       | `30`    |
-
-For self-signed certificates, set `GRAYLOG_VERIFY_TLS=false`.
+| Variable                      | Required | Default |
+|-------------------------------|----------|---------|
+| `GRAYLOG_BASE_URL`            | yes      |         |
+| `GRAYLOG_API_TOKEN`           | yes      |         |
+| `GRAYLOG_VERIFY_TLS`          | no       | `true`  |
+| `GRAYLOG_ALLOW_INSECURE_HTTP` | no       | `false` |
+| `GRAYLOG_TIMEOUT_SECONDS`     | no       | `30`    |
 
 ## Run
 
@@ -105,8 +104,8 @@ docker run --rm -i \
 ```
 
 The `-i` flag keeps standard input open because MCP communicates over stdio.
-Optional configuration variables such as `GRAYLOG_VERIFY_TLS` and
-`GRAYLOG_TIMEOUT_SECONDS` can be passed with additional `-e` flags.
+Optional configuration variables such as `GRAYLOG_VERIFY_TLS`,
+`GRAYLOG_ALLOW_INSECURE_HTTP`, and `GRAYLOG_TIMEOUT_SECONDS` can be passed with additional `-e` flags.
 
 ### Locking Dependencies
 
@@ -149,17 +148,15 @@ your Graylog URL and API token. Optional settings can be added under `env`:
 ```json
 {
   "GRAYLOG_VERIFY_TLS": "true",
+  "GRAYLOG_ALLOW_INSECURE_HTTP": "false",
   "GRAYLOG_TIMEOUT_SECONDS": "30"
 }
 ```
 
-For a self-signed Graylog certificate, set `GRAYLOG_VERIFY_TLS` to `"false"`.
-
 #### OpenCode
 
 For a local installation, add this server to
-`~/.config/opencode/opencode.json` (or merge it into a project-level
-`opencode.json`):
+`~/.config/opencode/opencode.json` (or merge it into a project-level `opencode.json`):
 
 ```json
 {
