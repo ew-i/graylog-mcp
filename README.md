@@ -80,9 +80,48 @@ For self-signed certificates, set `GRAYLOG_VERIFY_TLS=false`.
 
 ## Run
 
+### No Docker
+
 ```bash
-pip install -e .
-graylog-mcp            # or: python -m graylog_mcp
+uv sync
+uv run graylog-mcp     # or: uv run python -m graylog_mcp
+```
+
+### Docker
+
+Build the image from the project root:
+
+```bash
+docker build -t graylog-mcp .
+```
+
+Run the MCP server over stdio:
+
+```bash
+docker run --rm -i \
+  -e GRAYLOG_BASE_URL=https://graylog.example.com \
+  -e GRAYLOG_API_TOKEN=your-graylog-api-token \
+  graylog-mcp
+```
+
+The `-i` flag keeps standard input open because MCP communicates over stdio.
+Optional configuration variables such as `GRAYLOG_VERIFY_TLS` and
+`GRAYLOG_TIMEOUT_SECONDS` can be passed with additional `-e` flags.
+
+### Locking Dependencies
+
+The Docker build uses `uv.lock` to install exact dependency versions. Generate
+or refresh it from the project root after changing dependencies in
+`pyproject.toml`:
+
+```bash
+uv lock
+```
+
+Verify that the lockfile matches the project metadata with:
+
+```bash
+uv lock --check
 ```
 
 ### MCP Client Configuration
@@ -94,7 +133,7 @@ as Claude Desktop or Cursor:
 {
   "mcpServers": {
     "graylog": {
-      "command": "/absolute/path/to/graylog-mcp/venv/bin/graylog-mcp",
+      "command": "/absolute/path/to/graylog-mcp/.venv/bin/graylog-mcp",
       "env": {
         "GRAYLOG_BASE_URL": "https://graylog.example.com",
         "GRAYLOG_API_TOKEN": "your-graylog-api-token"
@@ -116,13 +155,97 @@ your Graylog URL and API token. Optional settings can be added under `env`:
 
 For a self-signed Graylog certificate, set `GRAYLOG_VERIFY_TLS` to `"false"`.
 
+#### OpenCode
+
+For a local installation, add this server to
+`~/.config/opencode/opencode.json` (or merge it into a project-level
+`opencode.json`):
+
+```json
+{
+  "mcp": {
+    "graylog": {
+      "type": "local",
+      "command": [
+        "/absolute/path/to/graylog-mcp/.venv/bin/graylog-mcp"
+      ],
+      "environment": {
+        "GRAYLOG_BASE_URL": "https://graylog.example.com",
+        "GRAYLOG_API_TOKEN": "your-graylog-api-token"
+      },
+      "enabled": true
+    }
+  }
+}
+```
+
+### Docker Client Configuration
+
+When using the Docker image, configure the MCP client to run Docker with an
+interactive stdin. The client must be able to find the image built as
+`graylog-mcp`.
+
+#### Claude Desktop
+
+Add this server to Claude Desktop's MCP configuration:
+
+```json
+{
+  "mcpServers": {
+    "graylog": {
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-e",
+        "GRAYLOG_BASE_URL=https://graylog.example.com",
+        "-e",
+        "GRAYLOG_API_TOKEN=your-graylog-api-token",
+        "graylog-mcp"
+      ]
+    }
+  }
+}
+```
+
+#### OpenCode
+
+Add this server to your OpenCode configuration at `~/.config/opencode/opencode.json`
+(or merge it into an existing project-level `opencode.json`):
+
+```json
+{
+  "mcp": {
+    "graylog": {
+      "type": "local",
+      "command": [
+        "docker",
+        "run",
+        "--rm",
+        "-i",
+        "--env",
+        "GRAYLOG_BASE_URL=https://graylog.example.com",
+        "--env",
+        "GRAYLOG_API_TOKEN=your-graylog-api-token",
+        "graylog-mcp"
+      ],
+      "enabled": true
+    }
+  }
+}
+```
+
+Add optional settings as additional Docker arguments, for example:
+`"--env", "GRAYLOG_VERIFY_TLS=false"`.
+
 ## Develop
 
 ```bash
-pip install -e ".[dev]"
-pytest                       # or, stdlib only: python -m unittest discover -s tests -t .
-ruff check src tests         # PEP 8 + static checks (config in pyproject.toml)
-ruff format src tests        # auto-format; CI runs `ruff format --check`
+uv sync --dev
+uv run pytest                    # or, stdlib only: uv run python -m unittest discover -s tests -t .
+uv run ruff check src tests      # PEP 8 + static checks (config in pyproject.toml)
+uv run ruff format src tests     # auto-format; CI runs `uv run ruff format --check`
 ```
 
 Style: PEP 8 via ruff (`E`, `W`, `F`, `N`, `I`, `B`, `UP`, `SIM`, `C4`), 99-character
