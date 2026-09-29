@@ -1,0 +1,106 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: PEP 8 and static checks
+        run: ruff check --output-format=github src tests
+
+      - name: Formatting
+        run: ruff format --check --diff src tests
+
+  test:
+    name: Test (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        run: pytest --cov=src/graylog_mcp --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=100
+
+      - name: Make code coverage badge
+        if: matrix.python-version == '3.14'
+        run: |
+          mkdir -p output
+          coverage-badge -o output/coverage.svg
+
+      - name: Publish coverage badge
+        if: matrix.python-version == '3.14'
+        env:
+          BADGE_TOKEN: ${{ secrets.BADGE_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone "https://x-access-token:${BADGE_TOKEN}@github.com/ew-i/badges.git" badges
+          mkdir -p badges/graylog-mcp
+          cp output/coverage.svg badges/graylog-mcp/coverage.svg
+          cd badges
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add graylog-mcp/coverage.svg
+          git commit -m "Update graylog-mcp coverage badge" || exit 0
+          git push
+
+  build:
+    name: Build package
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.14"
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error

@@ -1,0 +1,57 @@
+[build-system]
+requires = ["hatchling==1.32.4"]
+build-backend = "hatchling.build"
+
+[project]
+name = "graylog-mcp"
+version = "1.1.0"
+description = "Read-only Graylog search, analysis and health tools exposed over MCP"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp==2.2.0",
+    "httpx==0.28.1",
+    "python-dotenv==1.2.3",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.1.1",
+    "pytest-cov==6.2.1",
+    "coverage-badge==1.1.2",
+    "setuptools<81",
+    "ruff==0.16.9",
+]
+
+[project.scripts]
+graylog-mcp = "graylog_mcp.__main__:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/graylog_mcp"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+# PEP 8 allows teams to agree on up to 99 characters; tool docstrings benefit from it.
+line-length = 99
+target-version = "py310"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",   # pycodestyle: PEP 8 layout, whitespace, line length
+    "F",        # pyflakes: unused imports/variables, undefined names
+    "N",        # pep8-naming
+    "I",        # import order (PEP 8 import grouping)
+    "B",        # bugbear: likely bugs
+    "UP",       # modern syntax for the minimum Python version
+    "SIM",      # simplifications
+    "C4",       # comprehension style
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["graylog_mcp"]
+
+[tool.ruff.format]
+quote-style = "double"
