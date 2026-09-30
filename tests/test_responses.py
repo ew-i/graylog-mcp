@@ -26,9 +26,7 @@ class ResponseRedactionTest(unittest.TestCase):
             "webhook",
         )
 
-        result = json.loads(
-            respond(lambda: {key: f"value-for-{key}" for key in sensitive_keys})
-        )
+        result = json.loads(respond(lambda: {key: f"value-for-{key}" for key in sensitive_keys}))
 
         for key in sensitive_keys:
             with self.subTest(key=key):

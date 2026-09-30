@@ -77,7 +77,8 @@ def redact(value: Any) -> Any:
 def _redact(value: Any, sensitive_keys: frozenset[str]) -> Any:
     if isinstance(value, Mapping):
         return {
-            key: REDACTED if isinstance(key, str) and _is_sensitive_key(key, sensitive_keys)
+            key: REDACTED
+            if isinstance(key, str) and _is_sensitive_key(key, sensitive_keys)
             else _redact(item, sensitive_keys)
             for key, item in value.items()
         }

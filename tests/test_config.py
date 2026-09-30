@@ -21,9 +21,7 @@ class SettingsTest(unittest.TestCase):
 
     def test_http_requires_explicit_development_override(self):
         with self.assertRaisesRegex(ConfigError, "GRAYLOG_ALLOW_INSECURE_HTTP"):
-            Settings.from_env(
-                {**BASE, "GRAYLOG_BASE_URL": "http://localhost:9000"}
-            )
+            Settings.from_env({**BASE, "GRAYLOG_BASE_URL": "http://localhost:9000"})
 
         settings = Settings.from_env(
             {
