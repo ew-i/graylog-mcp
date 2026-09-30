@@ -61,12 +61,12 @@ jobs:
           uv run coverage-badge -o output/coverage.svg
 
       - name: Publish coverage badge
-        if: matrix.python-version == '3.14'
+        if: matrix.python-version == '3.14' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           BADGE_TOKEN: ${{ secrets.BADGE_TOKEN }}
         run: |
           set -euo pipefail
-          git clone "https://x-access-token:${BADGE_TOKEN}@github.com/ew-i/badges.git" badges
+          git -c 'credential.helper=!f() { echo "username=x-access-token"; echo "password=$BADGE_TOKEN"; }; f' clone "https://github.com/ew-i/badges.git" badges
           mkdir -p badges/graylog-mcp
           cp output/coverage.svg badges/graylog-mcp/coverage.svg
           cd badges
