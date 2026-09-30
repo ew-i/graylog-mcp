@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from ..domain.errors import GraylogMcpError
+from .redaction import redact
 
 
 def respond(action: Callable[[], Any]) -> str:
@@ -15,4 +16,4 @@ def respond(action: Callable[[], Any]) -> str:
         payload = action()
     except GraylogMcpError as exc:
         payload = {"error": str(exc), "kind": exc.kind}
-    return json.dumps(payload, indent=2, default=str)
+    return json.dumps(redact(payload), indent=2, default=str)

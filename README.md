@@ -69,13 +69,18 @@ tests/              domain, services (with fakes), adapters (MockTransport), MCP
 
 ## Configuration
 
-| Variable                      | Required | Default |
-|-------------------------------|----------|---------|
-| `GRAYLOG_BASE_URL`            | yes      |         |
-| `GRAYLOG_API_TOKEN`           | yes      |         |
-| `GRAYLOG_VERIFY_TLS`          | no       | `true`  |
-| `GRAYLOG_ALLOW_INSECURE_HTTP` | no       | `false` |
-| `GRAYLOG_TIMEOUT_SECONDS`     | no       | `30`    |
+| Variable                      | Required | Default                   |
+|-------------------------------|----------|---------------------------|
+| `GRAYLOG_BASE_URL`            | yes      |                           |
+| `GRAYLOG_API_TOKEN`           | yes      |                           |
+| `GRAYLOG_VERIFY_TLS`          | no       | `true`                    |
+| `GRAYLOG_ALLOW_INSECURE_HTTP` | no       | `false`                   |
+| `GRAYLOG_REDACT_FIELDS`       | no       | built-in sensitive fields |
+| `GRAYLOG_TIMEOUT_SECONDS`     | no       | `30`                      |
+
+MCP responses redact built-in credential fields and common credential patterns.
+Add application-specific field names as a comma-separated list with
+`GRAYLOG_REDACT_FIELDS`; built-in redaction rules cannot be disabled.
 
 ## Run
 
@@ -105,7 +110,8 @@ docker run --rm -i \
 
 The `-i` flag keeps standard input open because MCP communicates over stdio.
 Optional configuration variables such as `GRAYLOG_VERIFY_TLS`,
-`GRAYLOG_ALLOW_INSECURE_HTTP`, and `GRAYLOG_TIMEOUT_SECONDS` can be passed with additional `-e` flags.
+`GRAYLOG_ALLOW_INSECURE_HTTP`, `GRAYLOG_REDACT_FIELDS`, and
+`GRAYLOG_TIMEOUT_SECONDS` can be passed with additional `-e` flags.
 
 ### Locking Dependencies
 

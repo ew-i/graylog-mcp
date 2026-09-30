@@ -128,6 +128,30 @@ class McpToolsTest(unittest.TestCase):
         result = self.call("find_recent_logs", query="*", stream_id="s1")
         self.assertEqual(result["messages"], [{"msg": "boom", "pod": "a"}])
 
+    def test_sensitive_log_values_are_redacted(self):
+        self.logs.entries = [
+            {
+                "password": "plain-secret",
+                "nested": {"api_key": "key-value"},
+                "message": "Authorization: Bearer bearer-value",
+                "safe": "not secret",
+            }
+        ]
+
+        result = self.call("find_recent_logs", query="*", stream_id="s1")
+
+        self.assertEqual(
+            result["messages"],
+            [
+                {
+                    "password": "[REDACTED]",
+                    "nested": {"api_key": "[REDACTED]"},
+                    "message": "Authorization: Bearer [REDACTED]",
+                    "safe": "not secret",
+                }
+            ],
+        )
+
     def test_aggregate_round_trip(self):
         result = self.call("rank_field_values", query="*", field="pod", stream_id="s1")
         self.assertEqual(result["top_values"], [{"value": "a", "count": 1}])
