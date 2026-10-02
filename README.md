@@ -69,41 +69,55 @@ tests/              domain, services (with fakes), adapters (MockTransport), MCP
 
 ## Configuration
 
-| Variable                      | Required | Default                   |
-|-------------------------------|----------|---------------------------|
-| `GRAYLOG_BASE_URL`            | yes      |                           |
-| `GRAYLOG_API_TOKEN`           | yes      |                           |
-| `GRAYLOG_VERIFY_TLS`          | no       | `true`                    |
-| `GRAYLOG_ALLOW_INSECURE_HTTP` | no       | `false`                   |
-| `MCP_REDACT_FIELDS`           | no       | built-in sensitive fields |
-| `GRAYLOG_TIMEOUT_SECONDS`     | no       | `30`                      |
-| `MCP_LOG_LEVEL`               | no       | `INFO`                    |
-| `MCP_TRANSPORT`               | no       | `stdio`                  |
-| `MCP_HOST`                    | no       | `127.0.0.1`              |
-| `MCP_PORT`                    | no       | `8000`                   |
-| `MCP_STREAMABLE_HTTP_PATH`    | no       | `/mcp`                   |
-| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | no | `false`       |
-| `MCP_ALLOWED_HOSTS`           | no       | empty                   |
-| `MCP_ALLOWED_ORIGINS`         | no       | empty                   |
+| Variable                              | Required | Default                   |
+|---------------------------------------|----------|---------------------------|
+| `GRAYLOG_BASE_URL`                    | yes      |                           |
+| `GRAYLOG_API_TOKEN`                   | yes      |                           |
+| `GRAYLOG_VERIFY_TLS`                  | no       | `true`                    |
+| `GRAYLOG_ALLOW_INSECURE_HTTP`         | no       | `false`                   |
+| `GRAYLOG_TIMEOUT_SECONDS`             | no       | `30`                      |
+| `MCP_REDACT_FIELDS`                   | no       | built-in sensitive fields |
+| `MCP_LOG_LEVEL`                       | no       | `INFO`                    |
+| `MCP_TRANSPORT`                       | no       | `stdio`                   |
+| `MCP_HOST`                            | no       | `127.0.0.1`               |
+| `MCP_PORT`                            | no       | `8000`                    |
+| `MCP_STREAMABLE_HTTP_PATH`            | no       | `/mcp`                    |
+| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | no       | `false`                   |
+| `MCP_ALLOWED_HOSTS`                   | no       | empty                     |
+| `MCP_ALLOWED_ORIGINS`                 | no       | empty                     |
 
 MCP responses redact built-in credential fields and common credential patterns.
 Add application-specific field names as a comma-separated list with
 `MCP_REDACT_FIELDS`; built-in redaction rules cannot be disabled.
-
-CLI arguments override environment values. The available connection options are
-`--base-url`, `--api-token`, `--verify-tls`/`--no-verify-tls`,
-`--allow-insecure-http`/`--no-allow-insecure-http`, `--timeout-seconds`, and
-`--log-level` (`DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`). The MCP
-transport options are `--transport` (`stdio` or `streamable-http`), `--host`,
-`--port`, `--streamable-http-path`,
-`--enable-dns-rebinding-protection`/`--no-enable-dns-rebinding-protection`,
-`--allowed-hosts`, and `--allowed-origins`.
 
 `MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` are comma-separated. When
 DNS-rebinding protection is enabled, every HTTP client must use an allowed
 `Host` value and, when present, an allowed `Origin` value. The values support
 the MCP SDK's `:*` port wildcard, such as `localhost:*` or
 `https://app.example:*`.
+
+**Graylog connection options**
+
+| Option                                               | Description                                          |
+|------------------------------------------------------|------------------------------------------------------|
+| `--base-url`                                         | Graylog URL                                          |
+| `--api-token`                                        | Graylog API token                                    |
+| `--verify-tls` / `--no-verify-tls`                   | Verify the Graylog TLS certificate                   |
+| `--allow-insecure-http` / `--no-allow-insecure-http` | Allow an `http://` Graylog URL for local development |
+| `--timeout-seconds`                                  | HTTP request timeout                                 |
+
+**MCP server options**
+
+| Option                                                                       | Description                                                       |
+|------------------------------------------------------------------------------|-------------------------------------------------------------------|
+| `--log-level`                                                                | Logging level: `DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL` |
+| `--transport`                                                                | MCP transport: `stdio` or `streamable-http`                       |
+| `--host`                                                                     | HTTP listen host                                                  |
+| `--port`                                                                     | HTTP listen port                                                  |
+| `--streamable-http-path`                                                     | Streamable HTTP endpoint path                                     |
+| `--enable-dns-rebinding-protection` / `--no-enable-dns-rebinding-protection` | Validate HTTP `Host` and `Origin` headers                         |
+| `--allowed-hosts`                                                            | Comma-separated allowed HTTP `Host` values                        |
+| `--allowed-origins`                                                          | Comma-separated allowed HTTP `Origin` values                      |
 
 Settings are also read from `.env`. Precedence is CLI
 arguments, process environment variables, `.env`, then the declared defaults.
@@ -150,7 +164,8 @@ uv run graylog-mcp
 
 ### Docker
 
-Build the image from the project root:
+The image supports both stdio and Streamable HTTP. Build it from the
+project root:
 
 ```bash
 docker build -t graylog-mcp .
@@ -167,21 +182,23 @@ docker run --rm -i \
 
 The `-i` flag keeps standard input open because MCP communicates over stdio.
 
-### Locking Dependencies
-
-The Docker build uses `uv.lock` to install exact dependency versions. Generate
-or refresh it from the project root after changing dependencies in
-`pyproject.toml`:
+To run Streamable HTTP instead, publish port `8000` and select the transport
+with MCP environment variables:
 
 ```bash
-uv lock
+docker run --rm \
+  -p 8000:8000 \
+  -e GRAYLOG_BASE_URL=https://graylog.example.com \
+  -e GRAYLOG_API_TOKEN=your-graylog-api-token \
+  -e MCP_TRANSPORT=streamable-http \
+  -e MCP_HOST=0.0.0.0 \
+  -e MCP_PORT=8000 \
+  graylog-mcp
 ```
 
-Verify that the lockfile matches the project metadata with:
-
-```bash
-uv lock --check
-```
+The endpoint is then available at `http://localhost:8000/mcp`. For a deployed
+endpoint, configure `MCP_ENABLE_DNS_REBINDING_PROTECTION`,
+`MCP_ALLOWED_HOSTS`, and `MCP_ALLOWED_ORIGINS` as described above.
 
 ### MCP Client Configuration
 
@@ -243,8 +260,8 @@ For a local stdio installation, add this server to
 
 ### Docker Client Configuration
 
-When using the Docker image over stdio, configure the MCP client to run Docker with an
-interactive stdin. The client must be able to find the image built as
+When using the Docker image over stdio, configure the MCP client to run Docker
+with an interactive stdin. The client must be able to find the image built as
 `graylog-mcp`.
 
 #### Claude Desktop
@@ -305,6 +322,8 @@ uv sync --dev
 uv run pytest                    # or, stdlib only: uv run python -m unittest discover -s tests -t .
 uv run ruff check src tests      # PEP 8 + static checks (config in pyproject.toml)
 uv run ruff format src tests     # auto-format; CI runs `uv run ruff format --check`
+uv lock                          # lock to exact dependency versions
+uv lock --check                  # verify that the lockfile matches the project metadata
 ```
 
 Style: PEP 8 via ruff (`E`, `W`, `F`, `N`, `I`, `B`, `UP`, `SIM`, `C4`), 99-character
