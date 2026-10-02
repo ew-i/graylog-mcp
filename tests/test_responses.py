@@ -103,7 +103,7 @@ class ResponseRedactionTest(unittest.TestCase):
         self.assertEqual(result["safe"], "ordinary text")
 
     def test_custom_field_names_extend_built_in_redaction(self):
-        with patch.dict(os.environ, {"GRAYLOG_REDACT_FIELDS": "employee_id, internal-note"}):
+        with patch.dict(os.environ, {"MCP_REDACT_FIELDS": "employee_id, internal-note"}):
             result = json.loads(
                 respond(lambda: {"employee_id": "e-123", "internal-note": "private"})
             )

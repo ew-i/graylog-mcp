@@ -51,7 +51,7 @@ def _normalized_key(key: str) -> str:
 
 
 def _sensitive_keys() -> frozenset[str]:
-    configured = os.environ.get("GRAYLOG_REDACT_FIELDS", "")
+    configured = os.environ.get("MCP_REDACT_FIELDS", "")
     extra = {_normalized_key(value) for value in configured.split(",") if value.strip()}
     return _DEFAULT_SENSITIVE_KEYS | extra
 

@@ -4,7 +4,15 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import PositiveFloat, ValidationError, ValidationInfo, field_validator
+from mcp.server.transport_security import TransportSecuritySettings
+from pydantic import (
+    Field,
+    PositiveFloat,
+    PositiveInt,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..domain.errors import GraylogMcpError
@@ -15,6 +23,7 @@ class ConfigError(GraylogMcpError):
 
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+Transport = Literal["stdio", "streamable-http"]
 
 
 class Settings(BaseSettings):
@@ -25,6 +34,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_ignore_empty=True,
         extra="ignore",
+        populate_by_name=True,
         validate_default=True,
     )
 
@@ -33,14 +43,33 @@ class Settings(BaseSettings):
     verify_tls: bool = True
     allow_insecure_http: bool = False
     timeout_seconds: PositiveFloat = 30.0
-    log_level: LogLevel = "INFO"
+    log_level: LogLevel = Field("INFO", validation_alias="MCP_LOG_LEVEL")
+    transport: Transport = Field("stdio", validation_alias="MCP_TRANSPORT")
+    host: str = Field("127.0.0.1", validation_alias="MCP_HOST")
+    port: PositiveInt = Field(8000, validation_alias="MCP_PORT")
+    streamable_http_path: str = Field("/mcp", validation_alias="MCP_STREAMABLE_HTTP_PATH")
+    enable_dns_rebinding_protection: bool = Field(
+        False, validation_alias="MCP_ENABLE_DNS_REBINDING_PROTECTION"
+    )
+    allowed_hosts: str = Field("", validation_alias="MCP_ALLOWED_HOSTS")
+    allowed_origins: str = Field("", validation_alias="MCP_ALLOWED_ORIGINS")
 
-    @field_validator("base_url", "api_token", mode="before")
+    @field_validator(
+        "base_url",
+        "api_token",
+        "host",
+        "streamable_http_path",
+        "allowed_hosts",
+        "allowed_origins",
+        mode="before",
+    )
     @classmethod
     def strip_strings(cls, value: str) -> str:
         return value.strip()
 
-    @field_validator("verify_tls", "allow_insecure_http", mode="before")
+    @field_validator(
+        "verify_tls", "allow_insecure_http", "enable_dns_rebinding_protection", mode="before"
+    )
     @classmethod
     def blank_booleans_use_defaults(cls, value: str, info: ValidationInfo) -> bool | str:
         if isinstance(value, str) and not value.strip():
@@ -56,6 +85,13 @@ class Settings(BaseSettings):
     @classmethod
     def normalize_log_level(cls, value: str) -> str:
         return value.strip().upper()
+
+    @field_validator("streamable_http_path")
+    @classmethod
+    def require_absolute_http_path(cls, value: str) -> str:
+        if not value.startswith("/"):
+            raise ValueError("streamable_http_path must start with '/'")
+        return value.rstrip("/") or "/"
 
     def validated(self) -> Settings:
         """Apply checks that depend on more than one setting."""
@@ -74,6 +110,18 @@ class Settings(BaseSettings):
                 "only for local development"
             )
         return self.model_copy(update={"base_url": base_url, "api_token": token})
+
+    def transport_security_settings(self) -> TransportSecuritySettings:
+        """Build the SDK security policy from comma-separated CLI/environment values."""
+        return TransportSecuritySettings(
+            enable_dns_rebinding_protection=self.enable_dns_rebinding_protection,
+            allowed_hosts=_split_csv(self.allowed_hosts),
+            allowed_origins=_split_csv(self.allowed_origins),
+        )
+
+
+def _split_csv(value: str) -> list[str]:
+    return [item.strip() for item in value.split(",") if item.strip()]
 
 
 def settings_error(exc: ValidationError) -> ConfigError:

@@ -19,6 +19,10 @@ class SettingsTest(unittest.TestCase):
         self.assertTrue(s.verify_tls)
         self.assertEqual(s.timeout_seconds, 30.0)
         self.assertEqual(s.log_level, "INFO")
+        self.assertEqual(s.transport, "stdio")
+        self.assertEqual(s.host, "127.0.0.1")
+        self.assertEqual(s.port, 8000)
+        self.assertEqual(s.streamable_http_path, "/mcp")
 
     def test_overrides(self):
         with patch.dict(
@@ -36,7 +40,7 @@ class SettingsTest(unittest.TestCase):
             env_file.write_text(
                 "GRAYLOG_BASE_URL=https://from-file.example\n"
                 "GRAYLOG_API_TOKEN=file-token\n"
-                "GRAYLOG_LOG_LEVEL=WARNING\n",
+                "MCP_LOG_LEVEL=WARNING\n",
                 encoding="utf-8",
             )
             with patch.dict(
@@ -89,6 +93,8 @@ class SettingsTest(unittest.TestCase):
             {"GRAYLOG_VERIFY_TLS": "maybe"},
             {"GRAYLOG_TIMEOUT_SECONDS": "soon"},
             {"GRAYLOG_TIMEOUT_SECONDS": "0"},
+            {"MCP_STREAMABLE_HTTP_PATH": "mcp"},
+            {"MCP_PORT": "0"},
         ):
             with (
                 self.subTest(**override),
@@ -96,6 +102,28 @@ class SettingsTest(unittest.TestCase):
                 self.assertRaises((ConfigError, ValidationError)),
             ):
                 Settings().validated()
+
+    def test_transport_security_settings_split_csv_values(self):
+        with patch.dict(
+            os.environ,
+            {
+                **BASE,
+                "MCP_ENABLE_DNS_REBINDING_PROTECTION": "true",
+                "MCP_ALLOWED_HOSTS": "mcp.example:8000, localhost:8000",
+                "MCP_ALLOWED_ORIGINS": "https://one.example, https://two.example",
+            },
+            clear=True,
+        ):
+            settings = Settings().validated()
+
+        self.assertEqual(
+            settings.transport_security_settings().model_dump(),
+            {
+                "enable_dns_rebinding_protection": True,
+                "allowed_hosts": ["mcp.example:8000", "localhost:8000"],
+                "allowed_origins": ["https://one.example", "https://two.example"],
+            },
+        )
 
     def test_boolean_aliases_and_blank_values(self):
         for value in ("1", "TRUE", "yes", "on"):

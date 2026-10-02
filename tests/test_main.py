@@ -13,9 +13,11 @@ from graylog_mcp import cli as entry
 class FakeServer:
     def __init__(self):
         self.transport = None
+        self.options = {}
 
-    def run(self, *, transport):
+    def run(self, *, transport, **options):
         self.transport = transport
+        self.options = options
 
 
 class ClientContext:
@@ -67,6 +69,43 @@ class CompositionRootTest(unittest.TestCase):
         self.assertFalse(settings.verify_tls)
         self.assertEqual(settings.timeout_seconds, 5.0)
         self.assertEqual(settings.log_level, "DEBUG")
+
+    def test_cli_arguments_configure_streamable_http_security(self):
+        with patch.dict(
+            os.environ,
+            {"GRAYLOG_BASE_URL": "https://gl.example", "GRAYLOG_API_TOKEN": "token"},
+            clear=True,
+        ):
+            settings = entry.parse_args(
+                [
+                    "--transport",
+                    "streamable-http",
+                    "--host",
+                    "0.0.0.0",
+                    "--port",
+                    "9000",
+                    "--streamable-http-path",
+                    "/api/mcp/",
+                    "--enable-dns-rebinding-protection",
+                    "--allowed-hosts",
+                    "mcp.example:9000,localhost:9000",
+                    "--allowed-origins",
+                    "https://app.example",
+                ]
+            )
+
+        self.assertEqual(settings.transport, "streamable-http")
+        self.assertEqual(settings.host, "0.0.0.0")
+        self.assertEqual(settings.port, 9000)
+        self.assertEqual(settings.streamable_http_path, "/api/mcp")
+        self.assertEqual(
+            settings.transport_security_settings().model_dump(),
+            {
+                "enable_dns_rebinding_protection": True,
+                "allowed_hosts": ["mcp.example:9000", "localhost:9000"],
+                "allowed_origins": ["https://app.example"],
+            },
+        )
 
     def test_cli_arguments_can_supply_required_configuration(self):
         with patch.dict(os.environ, {}, clear=True):
@@ -121,7 +160,7 @@ class CompositionRootTest(unittest.TestCase):
                 {
                     "GRAYLOG_BASE_URL": "https://gl.example",
                     "GRAYLOG_API_TOKEN": "token",
-                    "GRAYLOG_LOG_LEVEL": "DEBUG",
+                    "MCP_LOG_LEVEL": "DEBUG",
                 },
                 clear=True,
             ),
@@ -130,7 +169,44 @@ class CompositionRootTest(unittest.TestCase):
         ):
             self.assertEqual(entry.main([]), 0)
         self.assertEqual(server.transport, "stdio")
+        self.assertEqual(server.options, {})
         self.assertEqual(build_server.call_args.kwargs["log_level"], "DEBUG")
+
+    def test_main_runs_streamable_http_server(self):
+        server = FakeServer()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GRAYLOG_BASE_URL": "https://gl.example",
+                    "GRAYLOG_API_TOKEN": "token",
+                    "MCP_TRANSPORT": "streamable-http",
+                    "MCP_HOST": "0.0.0.0",
+                    "MCP_PORT": "9000",
+                    "MCP_STREAMABLE_HTTP_PATH": "/api/mcp",
+                    "MCP_ENABLE_DNS_REBINDING_PROTECTION": "true",
+                    "MCP_ALLOWED_HOSTS": "mcp.example:9000",
+                    "MCP_ALLOWED_ORIGINS": "https://app.example",
+                },
+                clear=True,
+            ),
+            patch.object(entry, "build_http_client", return_value=ClientContext()),
+            patch.object(entry, "build_server", return_value=server),
+        ):
+            self.assertEqual(entry.main([]), 0)
+
+        self.assertEqual(server.transport, "streamable-http")
+        self.assertEqual(server.options["host"], "0.0.0.0")
+        self.assertEqual(server.options["port"], 9000)
+        self.assertEqual(server.options["streamable_http_path"], "/api/mcp")
+        self.assertEqual(
+            server.options["transport_security"].model_dump(),
+            {
+                "enable_dns_rebinding_protection": True,
+                "allowed_hosts": ["mcp.example:9000"],
+                "allowed_origins": ["https://app.example"],
+            },
+        )
 
 
 if __name__ == "__main__":

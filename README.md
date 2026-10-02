@@ -1,7 +1,7 @@
 # graylog-mcp
 
-Read-only Graylog access exposed as 27 MCP tools over stdio: search, analysis,
-alerts, saved searches, cluster health and configuration.
+Read-only Graylog access exposed as 27 MCP tools over stdio or Streamable HTTP:
+search, analysis, alerts, saved searches, cluster health and configuration.
 
 [![build](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml) [![coverage](https://raw.githubusercontent.com/ew-i/badges/main/graylog-mcp/coverage.svg)](https://github.com/ew-i/graylog-mcp)
 
@@ -75,18 +75,35 @@ tests/              domain, services (with fakes), adapters (MockTransport), MCP
 | `GRAYLOG_API_TOKEN`           | yes      |                           |
 | `GRAYLOG_VERIFY_TLS`          | no       | `true`                    |
 | `GRAYLOG_ALLOW_INSECURE_HTTP` | no       | `false`                   |
-| `GRAYLOG_REDACT_FIELDS`       | no       | built-in sensitive fields |
+| `MCP_REDACT_FIELDS`           | no       | built-in sensitive fields |
 | `GRAYLOG_TIMEOUT_SECONDS`     | no       | `30`                      |
-| `GRAYLOG_LOG_LEVEL`           | no       | `INFO`                    |
+| `MCP_LOG_LEVEL`               | no       | `INFO`                    |
+| `MCP_TRANSPORT`               | no       | `stdio`                  |
+| `MCP_HOST`                    | no       | `127.0.0.1`              |
+| `MCP_PORT`                    | no       | `8000`                   |
+| `MCP_STREAMABLE_HTTP_PATH`    | no       | `/mcp`                   |
+| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | no | `false`       |
+| `MCP_ALLOWED_HOSTS`           | no       | empty                   |
+| `MCP_ALLOWED_ORIGINS`         | no       | empty                   |
 
 MCP responses redact built-in credential fields and common credential patterns.
 Add application-specific field names as a comma-separated list with
-`GRAYLOG_REDACT_FIELDS`; built-in redaction rules cannot be disabled.
+`MCP_REDACT_FIELDS`; built-in redaction rules cannot be disabled.
 
 CLI arguments override environment values. The available connection options are
 `--base-url`, `--api-token`, `--verify-tls`/`--no-verify-tls`,
 `--allow-insecure-http`/`--no-allow-insecure-http`, `--timeout-seconds`, and
-`--log-level` (`DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`).
+`--log-level` (`DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`). The MCP
+transport options are `--transport` (`stdio` or `streamable-http`), `--host`,
+`--port`, `--streamable-http-path`,
+`--enable-dns-rebinding-protection`/`--no-enable-dns-rebinding-protection`,
+`--allowed-hosts`, and `--allowed-origins`.
+
+`MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` are comma-separated. When
+DNS-rebinding protection is enabled, every HTTP client must use an allowed
+`Host` value and, when present, an allowed `Origin` value. The values support
+the MCP SDK's `:*` port wildcard, such as `localhost:*` or
+`https://app.example:*`.
 
 Settings are also read from `.env`. Precedence is CLI
 arguments, process environment variables, `.env`, then the declared defaults.
@@ -105,6 +122,31 @@ uv run graylog-mcp     # or: uv run python -m graylog_mcp.cli
 
 CLI arguments can override values from `.env` and the process environment. For
 example: `uv run graylog-mcp --log-level DEBUG --timeout-seconds 60`.
+
+### Streamable HTTP
+
+Run a Streamable HTTP MCP endpoint with the environment or equivalent CLI
+arguments:
+
+```bash
+MCP_TRANSPORT=streamable-http \
+MCP_HOST=127.0.0.1 \
+MCP_PORT=8000 \
+uv run graylog-mcp
+```
+
+The endpoint is available at `http://127.0.0.1:8000/mcp` by default. For a
+publicly reachable deployment, enable DNS-rebinding protection and list the
+hostnames and browser origins that clients are allowed to send:
+
+```bash
+MCP_TRANSPORT=streamable-http \
+MCP_HOST=0.0.0.0 \
+MCP_ENABLE_DNS_REBINDING_PROTECTION=true \
+MCP_ALLOWED_HOSTS=mcp.example.com:8000 \
+MCP_ALLOWED_ORIGINS=https://app.example \
+uv run graylog-mcp
+```
 
 ### Docker
 
@@ -143,8 +185,8 @@ uv lock --check
 
 ### MCP Client Configuration
 
-The server uses MCP over stdio. Add it to your MCP client configuration, such
-as Claude Desktop or Cursor:
+For stdio, add it to your MCP client configuration, such as Claude Desktop or
+Cursor:
 
 ```json
 {
@@ -162,9 +204,23 @@ as Claude Desktop or Cursor:
 
 Replace `/absolute/path/to/graylog-mcp` with the project directory.
 
+For Streamable HTTP, start the server with `MCP_TRANSPORT=streamable-http`
+and configure the client with the endpoint URL. For example, clients that use
+the standard remote MCP shape can use:
+
+```json
+{
+  "mcpServers": {
+    "graylog": {
+      "url": "http://127.0.0.1:8000/mcp"
+    }
+  }
+}
+```
+
 #### OpenCode
 
-For a local installation, add this server to
+For a local stdio installation, add this server to
 `~/.config/opencode/opencode.json` (or merge it into a project-level `opencode.json`):
 
 ```json
@@ -187,7 +243,7 @@ For a local installation, add this server to
 
 ### Docker Client Configuration
 
-When using the Docker image, configure the MCP client to run Docker with an
+When using the Docker image over stdio, configure the MCP client to run Docker with an
 interactive stdin. The client must be able to find the image built as
 `graylog-mcp`.
 

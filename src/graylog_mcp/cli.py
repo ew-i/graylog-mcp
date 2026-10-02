@@ -41,15 +41,19 @@ def wire(http: httpx.Client) -> ServiceBundle:
 
 def _settings_from_environment() -> Settings:
     try:
-        return Settings()
+        return Settings()  # type: ignore[call-arg]
     except ValidationError as exc:
         raise settings_error(exc) from exc
+
+
+def _uppercase(value: str) -> str:
+    return value.upper()
 
 
 def parse_args(argv: Sequence[str] | None = None) -> Settings:
     """Parse CLI overrides, using environment-backed settings as defaults."""
     defaults = _settings_from_environment()
-    parser = argparse.ArgumentParser(description="Run the Graylog MCP server over stdio.")
+    parser = argparse.ArgumentParser(description="Run the Graylog MCP server.")
     parser.add_argument("--base-url", default=defaults.base_url, help="Graylog URL")
     parser.add_argument("--api-token", default=defaults.api_token, help="Graylog API token")
     parser.add_argument(
@@ -72,10 +76,39 @@ def parse_args(argv: Sequence[str] | None = None) -> Settings:
     )
     parser.add_argument(
         "--log-level",
-        type=str.upper,
+        type=_uppercase,
         choices=("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"),
         default=defaults.log_level,
         help="MCP server log level",
+    )
+    parser.add_argument(
+        "--transport",
+        choices=("stdio", "streamable-http"),
+        default=defaults.transport,
+        help="MCP transport (default: stdio)",
+    )
+    parser.add_argument("--host", default=defaults.host, help="MCP HTTP listen host")
+    parser.add_argument("--port", type=int, default=defaults.port, help="MCP HTTP listen port")
+    parser.add_argument(
+        "--streamable-http-path",
+        default=defaults.streamable_http_path,
+        help="MCP Streamable HTTP endpoint path",
+    )
+    parser.add_argument(
+        "--enable-dns-rebinding-protection",
+        action=argparse.BooleanOptionalAction,
+        default=defaults.enable_dns_rebinding_protection,
+        help="Validate Host and Origin headers for HTTP transports",
+    )
+    parser.add_argument(
+        "--allowed-hosts",
+        default=defaults.allowed_hosts,
+        help="Comma-separated Host header values allowed for HTTP transports",
+    )
+    parser.add_argument(
+        "--allowed-origins",
+        default=defaults.allowed_origins,
+        help="Comma-separated Origin header values allowed for HTTP transports",
     )
     try:
         return Settings(**vars(parser.parse_args(argv))).validated()
@@ -91,7 +124,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     with build_http_client(settings) as http:
-        build_server(wire(http), log_level=settings.log_level).run(transport="stdio")
+        server = build_server(wire(http), log_level=settings.log_level)
+        if settings.transport == "streamable-http":
+            server.run(
+                transport=settings.transport,
+                host=settings.host,
+                port=settings.port,
+                streamable_http_path=settings.streamable_http_path,
+                transport_security=settings.transport_security_settings(),
+            )
+        else:
+            server.run(transport=settings.transport)
     return 0
 
 
