@@ -1,4 +1,10 @@
+import os
+import tempfile
 import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+from pydantic import ValidationError
 
 from graylog_mcp.infrastructure.config import ConfigError, Settings
 
@@ -7,34 +13,72 @@ BASE = {"GRAYLOG_BASE_URL": "https://gl.example/", "GRAYLOG_API_TOKEN": "tok"}
 
 class SettingsTest(unittest.TestCase):
     def test_defaults(self):
-        s = Settings.from_env(BASE)
+        with patch.dict(os.environ, BASE, clear=True):
+            s = Settings().validated()
         self.assertEqual(s.base_url, "https://gl.example")
         self.assertTrue(s.verify_tls)
         self.assertEqual(s.timeout_seconds, 30.0)
+        self.assertEqual(s.log_level, "INFO")
 
     def test_overrides(self):
-        s = Settings.from_env(
-            {**BASE, "GRAYLOG_VERIFY_TLS": "false", "GRAYLOG_TIMEOUT_SECONDS": "5"}
-        )
+        with patch.dict(
+            os.environ,
+            {**BASE, "GRAYLOG_VERIFY_TLS": "false", "GRAYLOG_TIMEOUT_SECONDS": "5"},
+            clear=True,
+        ):
+            s = Settings().validated()
         self.assertFalse(s.verify_tls)
         self.assertEqual(s.timeout_seconds, 5.0)
 
-    def test_http_requires_explicit_development_override(self):
-        with self.assertRaisesRegex(ConfigError, "GRAYLOG_ALLOW_INSECURE_HTTP"):
-            Settings.from_env({**BASE, "GRAYLOG_BASE_URL": "http://localhost:9000"})
+    def test_process_environment_overrides_env_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            env_file = Path(directory) / ".env"
+            env_file.write_text(
+                "GRAYLOG_BASE_URL=https://from-file.example\n"
+                "GRAYLOG_API_TOKEN=file-token\n"
+                "GRAYLOG_LOG_LEVEL=WARNING\n",
+                encoding="utf-8",
+            )
+            with patch.dict(
+                os.environ,
+                {
+                    "GRAYLOG_BASE_URL": "https://from-environment.example",
+                    "GRAYLOG_API_TOKEN": "environment-token",
+                },
+                clear=True,
+            ):
+                settings = Settings(_env_file=env_file).validated()
 
-        settings = Settings.from_env(
+        self.assertEqual(settings.base_url, "https://from-environment.example")
+        self.assertEqual(settings.api_token, "environment-token")
+        self.assertEqual(settings.log_level, "WARNING")
+
+    def test_http_requires_explicit_development_override(self):
+        with (
+            patch.dict(
+                os.environ,
+                {**BASE, "GRAYLOG_BASE_URL": "http://localhost:9000"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(ConfigError, "GRAYLOG_ALLOW_INSECURE_HTTP"),
+        ):
+            Settings().validated()
+
+        with patch.dict(
+            os.environ,
             {
                 **BASE,
                 "GRAYLOG_BASE_URL": "http://localhost:9000",
                 "GRAYLOG_ALLOW_INSECURE_HTTP": "true",
-            }
-        )
+            },
+            clear=True,
+        ):
+            settings = Settings().validated()
         self.assertEqual(settings.base_url, "http://localhost:9000")
 
     def test_missing_values_are_all_reported(self):
-        with self.assertRaises(ConfigError) as ctx:
-            Settings.from_env({})
+        with patch.dict(os.environ, {}, clear=True), self.assertRaises(ConfigError) as ctx:
+            Settings().validated()
         self.assertIn("GRAYLOG_BASE_URL", str(ctx.exception))
         self.assertIn("GRAYLOG_API_TOKEN", str(ctx.exception))
 
@@ -46,15 +90,22 @@ class SettingsTest(unittest.TestCase):
             {"GRAYLOG_TIMEOUT_SECONDS": "soon"},
             {"GRAYLOG_TIMEOUT_SECONDS": "0"},
         ):
-            with self.subTest(**override), self.assertRaises(ConfigError):
-                Settings.from_env({**BASE, **override})
+            with (
+                self.subTest(**override),
+                patch.dict(os.environ, {**BASE, **override}, clear=True),
+                self.assertRaises((ConfigError, ValidationError)),
+            ):
+                Settings().validated()
 
     def test_boolean_aliases_and_blank_values(self):
         for value in ("1", "TRUE", "yes", "on"):
-            self.assertTrue(Settings.from_env({**BASE, "GRAYLOG_VERIFY_TLS": value}).verify_tls)
+            with patch.dict(os.environ, {**BASE, "GRAYLOG_VERIFY_TLS": value}, clear=True):
+                self.assertTrue(Settings().validated().verify_tls)
         for value in ("0", "FALSE", "no", "off"):
-            self.assertFalse(Settings.from_env({**BASE, "GRAYLOG_VERIFY_TLS": value}).verify_tls)
-        self.assertTrue(Settings.from_env({**BASE, "GRAYLOG_VERIFY_TLS": " "}).verify_tls)
+            with patch.dict(os.environ, {**BASE, "GRAYLOG_VERIFY_TLS": value}, clear=True):
+                self.assertFalse(Settings().validated().verify_tls)
+        with patch.dict(os.environ, {**BASE, "GRAYLOG_VERIFY_TLS": " "}, clear=True):
+            self.assertTrue(Settings().validated().verify_tls)
 
 
 if __name__ == "__main__":

@@ -59,11 +59,11 @@ src/graylog_mcp/
     graylog_api.py    shared HTTP client: auth, error mapping, JSON
     graylog_http.py  graylog_analytics.py  graylog_alerts.py
     graylog_views.py  graylog_system.py  graylog_config.py
-    config.py         Settings.from_env
+    config.py         Pydantic Settings loaded from the environment
   interface/        MCP tools, one module per area
     mcp_tools.py      ServiceBundle + build_server
     tools_*.py  responses.py
-  __main__.py       composition root
+  cli.py             argparse entrypoint and composition root
 tests/              domain, services (with fakes), adapters (MockTransport), MCP round trips
 ```
 
@@ -77,19 +77,34 @@ tests/              domain, services (with fakes), adapters (MockTransport), MCP
 | `GRAYLOG_ALLOW_INSECURE_HTTP` | no       | `false`                   |
 | `GRAYLOG_REDACT_FIELDS`       | no       | built-in sensitive fields |
 | `GRAYLOG_TIMEOUT_SECONDS`     | no       | `30`                      |
+| `GRAYLOG_LOG_LEVEL`           | no       | `INFO`                    |
 
 MCP responses redact built-in credential fields and common credential patterns.
 Add application-specific field names as a comma-separated list with
 `GRAYLOG_REDACT_FIELDS`; built-in redaction rules cannot be disabled.
 
+CLI arguments override environment values. The available connection options are
+`--base-url`, `--api-token`, `--verify-tls`/`--no-verify-tls`,
+`--allow-insecure-http`/`--no-allow-insecure-http`, `--timeout-seconds`, and
+`--log-level` (`DEBUG`, `INFO`, `WARNING`, `ERROR`, or `CRITICAL`).
+
+Settings are also read from `.env`. Precedence is CLI
+arguments, process environment variables, `.env`, then the declared defaults.
+
 ## Run
 
 ### No Docker
 
+Create a local environment file from the example and edit the required values:
+
 ```bash
+cp .env.example .env
 uv sync
-uv run graylog-mcp     # or: uv run python -m graylog_mcp
+uv run graylog-mcp     # or: uv run python -m graylog_mcp.cli
 ```
+
+CLI arguments can override values from `.env` and the process environment. For
+example: `uv run graylog-mcp --log-level DEBUG --timeout-seconds 60`.
 
 ### Docker
 
@@ -109,9 +124,6 @@ docker run --rm -i \
 ```
 
 The `-i` flag keeps standard input open because MCP communicates over stdio.
-Optional configuration variables such as `GRAYLOG_VERIFY_TLS`,
-`GRAYLOG_ALLOW_INSECURE_HTTP`, `GRAYLOG_REDACT_FIELDS`, and
-`GRAYLOG_TIMEOUT_SECONDS` can be passed with additional `-e` flags.
 
 ### Locking Dependencies
 
@@ -148,16 +160,7 @@ as Claude Desktop or Cursor:
 }
 ```
 
-Replace `/absolute/path/to/graylog-mcp` with the project directory and provide
-your Graylog URL and API token. Optional settings can be added under `env`:
-
-```json
-{
-  "GRAYLOG_VERIFY_TLS": "true",
-  "GRAYLOG_ALLOW_INSECURE_HTTP": "false",
-  "GRAYLOG_TIMEOUT_SECONDS": "30"
-}
-```
+Replace `/absolute/path/to/graylog-mcp` with the project directory.
 
 #### OpenCode
 
@@ -238,9 +241,6 @@ Add this server to your OpenCode configuration at `~/.config/opencode/opencode.j
   }
 }
 ```
-
-Add optional settings as additional Docker arguments, for example:
-`"--env", "GRAYLOG_VERIFY_TLS=false"`.
 
 ## Develop
 

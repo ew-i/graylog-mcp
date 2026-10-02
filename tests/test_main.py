@@ -1,12 +1,13 @@
 import os
 import runpy
+import sys
 import unittest
 import warnings
 from unittest.mock import patch
 
 import httpx
 
-from graylog_mcp import __main__ as entry
+from graylog_mcp import cli as entry
 
 
 class FakeServer:
@@ -40,27 +41,76 @@ class CompositionRootTest(unittest.TestCase):
 
     def test_main_rejects_missing_configuration(self):
         with patch.dict(os.environ, {}, clear=True):
-            self.assertEqual(entry.main(), 1)
+            self.assertEqual(entry.main([]), 1)
 
-    def test_main_allows_missing_optional_dotenv(self):
-        original_import = __import__
+    def test_cli_arguments_override_environment_defaults(self):
+        with patch.dict(
+            os.environ,
+            {"GRAYLOG_BASE_URL": "https://from-env.example", "GRAYLOG_API_TOKEN": "env-token"},
+            clear=True,
+        ):
+            settings = entry.parse_args(
+                [
+                    "--base-url",
+                    "https://from-cli.example/",
+                    "--api-token",
+                    "cli-token",
+                    "--no-verify-tls",
+                    "--timeout-seconds",
+                    "5",
+                    "--log-level",
+                    "debug",
+                ]
+            )
+        self.assertEqual(settings.base_url, "https://from-cli.example")
+        self.assertEqual(settings.api_token, "cli-token")
+        self.assertFalse(settings.verify_tls)
+        self.assertEqual(settings.timeout_seconds, 5.0)
+        self.assertEqual(settings.log_level, "DEBUG")
 
-        def import_without_dotenv(name, *args, **kwargs):
-            if name == "dotenv":
-                raise ImportError
-            return original_import(name, *args, **kwargs)
+    def test_cli_arguments_can_supply_required_configuration(self):
+        with patch.dict(os.environ, {}, clear=True):
+            settings = entry.parse_args(
+                ["--base-url", "https://gl.example", "--api-token", "token"]
+            )
+        self.assertEqual(settings.base_url, "https://gl.example")
+        self.assertEqual(settings.api_token, "token")
 
+    def test_invalid_environment_setting_is_reported_as_config_error(self):
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GRAYLOG_BASE_URL": "https://gl.example",
+                    "GRAYLOG_API_TOKEN": "token",
+                    "GRAYLOG_TIMEOUT_SECONDS": "soon",
+                },
+                clear=True,
+            ),
+            self.assertRaisesRegex(entry.ConfigError, "valid number"),
+        ):
+            entry.parse_args([])
+
+    def test_invalid_cli_setting_is_reported_as_config_error(self):
+        with (
+            patch.dict(
+                os.environ,
+                {"GRAYLOG_BASE_URL": "https://gl.example", "GRAYLOG_API_TOKEN": "token"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(entry.ConfigError, "greater than 0"),
+        ):
+            entry.parse_args(["--timeout-seconds", "0"])
+
+    def test_cli_module_exits_with_configuration_error(self):
         with (
             patch.dict(os.environ, {}, clear=True),
-            patch("builtins.__import__", side_effect=import_without_dotenv),
+            patch.object(sys, "argv", ["graylog-mcp"]),
+            warnings.catch_warnings(),
         ):
-            self.assertEqual(entry.main(), 1)
-
-    def test_module_entrypoint_exits_with_configuration_error(self):
-        with patch.dict(os.environ, {}, clear=True), warnings.catch_warnings():
             warnings.simplefilter("ignore", RuntimeWarning)
             with self.assertRaises(SystemExit) as ctx:
-                runpy.run_module("graylog_mcp.__main__", run_name="__main__")
+                runpy.run_module("graylog_mcp.cli", run_name="__main__")
         self.assertEqual(ctx.exception.code, 1)
 
     def test_main_runs_stdio_server(self):
@@ -68,14 +118,19 @@ class CompositionRootTest(unittest.TestCase):
         with (
             patch.dict(
                 os.environ,
-                {"GRAYLOG_BASE_URL": "https://gl.example", "GRAYLOG_API_TOKEN": "token"},
+                {
+                    "GRAYLOG_BASE_URL": "https://gl.example",
+                    "GRAYLOG_API_TOKEN": "token",
+                    "GRAYLOG_LOG_LEVEL": "DEBUG",
+                },
                 clear=True,
             ),
             patch.object(entry, "build_http_client", return_value=ClientContext()),
-            patch.object(entry, "build_server", return_value=server),
+            patch.object(entry, "build_server", return_value=server) as build_server,
         ):
-            self.assertEqual(entry.main(), 0)
+            self.assertEqual(entry.main([]), 0)
         self.assertEqual(server.transport, "stdio")
+        self.assertEqual(build_server.call_args.kwargs["log_level"], "DEBUG")
 
 
 if __name__ == "__main__":

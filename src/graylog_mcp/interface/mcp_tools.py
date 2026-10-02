@@ -7,6 +7,7 @@ Each area registers its own tools; none of them raise. Expected failures become
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from mcp.server.mcpserver import MCPServer
 
@@ -41,10 +42,13 @@ INSTRUCTIONS = (
     "searches and analyses need a stream_id. For troubleshooting, "
     "recent_alerts, count_over_time and compare_windows are good starting points."
 )
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
-def build_server(services: ServiceBundle, name: str = "graylog") -> MCPServer:
-    server = MCPServer(name, instructions=INSTRUCTIONS)
+def build_server(
+    services: ServiceBundle, name: str = "graylog", log_level: LogLevel = "INFO"
+) -> MCPServer:
+    server = MCPServer(name, instructions=INSTRUCTIONS, log_level=log_level)
     tools_search.register(server, services.search)
     tools_analytics.register(server, services.analytics)
     tools_alerts.register(server, services.alerts)

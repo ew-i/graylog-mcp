@@ -109,6 +109,7 @@ class McpToolsTest(unittest.TestCase):
 
     def test_registers_expected_tools(self):
         self.assertEqual(set(self.tools()), EXPECTED_TOOLS)
+        self.assertEqual(self.server.settings.log_level, "INFO")
 
     def test_every_tool_is_documented(self):
         for name, tool in self.tools().items():

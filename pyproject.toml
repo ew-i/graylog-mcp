@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "mcp==2.2.0",
     "httpx==0.28.1",
-    "python-dotenv==1.2.3",
+    "pydantic-settings==2.15.0",
 ]
 
 [dependency-groups]
@@ -23,7 +23,7 @@ dev = [
 ]
 
 [project.scripts]
-graylog-mcp = "graylog_mcp.__main__:main"
+graylog-mcp = "graylog_mcp.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/graylog_mcp"]

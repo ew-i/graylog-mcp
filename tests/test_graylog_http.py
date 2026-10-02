@@ -158,7 +158,9 @@ class ErrorMappingTest(unittest.TestCase):
 
 class ClientFactoryTest(unittest.TestCase):
     def test_client_uses_settings(self):
-        settings = Settings("https://gl.example", "tok", verify_tls=True, timeout_seconds=5)
+        settings = Settings(
+            base_url="https://gl.example", api_token="tok", verify_tls=True, timeout_seconds=5
+        ).validated()
         with build_http_client(settings) as client:
             self.assertEqual(str(client.base_url), "https://gl.example")
             self.assertEqual(client.headers["X-Requested-By"], "graylog-mcp")
