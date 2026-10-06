@@ -73,6 +73,7 @@ class ReadEndpointsTest(unittest.TestCase):
         store, rec = store_with(ok({"index": "i", "message": {"_id": "m/1", "msg": "x"}}))
         entry = store.fetch("idx", "m/1")
         self.assertEqual(entry.fields["msg"], "x")
+        self.assertEqual(entry.index, "idx")
         self.assertEqual(rec.requests[0].url.raw_path, b"/api/messages/idx/m%2F1")
 
 

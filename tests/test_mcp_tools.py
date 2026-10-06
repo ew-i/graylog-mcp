@@ -51,6 +51,8 @@ EXPECTED_TOOLS = {
     "throughput",
     "system_notifications",
     "cluster_nodes",
+    # incident investigation
+    "investigate_incident",
     # configuration
     "stream_rules",
     "pipeline_rules",
@@ -70,6 +72,7 @@ STREAM_SCOPED = {
     "compare_windows",
     "field_stats",
     "message_context",
+    "investigate_incident",
     "stream_rules",
 }
 
@@ -124,6 +127,15 @@ class McpToolsTest(unittest.TestCase):
 
     def test_browse_streams(self):
         self.assertEqual(self.call("browse_streams")["streams"][0]["id"], "s1")
+
+    def test_investigate_incident_round_trip(self):
+        result = self.call("investigate_incident", query="level:3", stream_id="s1")
+        self.assertEqual(result["query"], "level:3")
+        self.assertEqual(result["stream_id"], "s1")
+        self.assertIn("cluster_health", result)
+        self.assertIn("message_volume", result)
+        self.assertIn("top_values", result)
+        self.assertIn("configuration", result)
 
     def test_search_round_trip(self):
         result = self.call("find_recent_logs", query="*", stream_id="s1")

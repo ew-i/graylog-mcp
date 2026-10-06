@@ -57,9 +57,19 @@ class LogService:
         fields: str = "",
         sort_field: str = "timestamp",
         sort_order: str = "desc",
+        include_references: bool = False,
     ) -> JsonDict:
         window = LastSeconds(_clamp(seconds, 1, self._limits.max_window_seconds))
-        return self._search(text, stream_id, window, limit, fields, sort_field, sort_order)
+        return self._search(
+            text,
+            stream_id,
+            window,
+            limit,
+            fields,
+            sort_field,
+            sort_order,
+            include_references,
+        )
 
     def search_between(
         self,
@@ -86,6 +96,7 @@ class LogService:
         fields: str,
         sort_field: str,
         sort_order: str,
+        include_references: bool = False,
     ) -> JsonDict:
         query = LogQuery(
             text=text,
@@ -97,13 +108,20 @@ class LogService:
         )
         page = self._store.search(query)
         messages = [entry.visible(query.only_fields) for entry in page.entries]
-        return {
+        result: JsonDict = {
             "query": query.text,
             "window": window.describe(),
             "total_results": page.total_hits,
             "returned": len(messages),
             "messages": messages,
         }
+        if include_references:
+            result["references"] = [
+                {"index": entry.index, "message_id": entry.fields.get("_id")}
+                for entry in page.entries
+                if entry.index and entry.fields.get("_id")
+            ]
+        return result
 
     # -- single message ------------------------------------------------------
 

@@ -107,6 +107,7 @@ class LogEntry:
     """One log message as a flat field mapping."""
 
     fields: Mapping[str, Any]
+    index: str | None = None
 
     _HIDDEN_PREFIXES = ("gl2_",)
     _HIDDEN_KEYS = frozenset({"_id", "streams"})

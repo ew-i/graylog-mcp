@@ -2,7 +2,14 @@ import unittest
 
 from graylog_mcp.application.service import Limits, LogService, parse_field_list
 from graylog_mcp.domain.errors import InvalidRequestError, NotFoundError
-from graylog_mcp.domain.models import Between, LastSeconds, SortDirection, Stream
+from graylog_mcp.domain.models import (
+    Between,
+    LastSeconds,
+    LogEntry,
+    SearchPage,
+    SortDirection,
+    Stream,
+)
 
 from .fakes import FakeLogStore
 
@@ -67,6 +74,17 @@ class SearchTest(ServiceTestCase):
         )
         self.assertEqual(result["messages"], [{"pod": "p", "msg": "hi"}])
         self.assertEqual(self.store.last_query.only_fields, ("pod", "msg"))
+
+    def test_incident_search_can_return_message_references(self):
+        self.store.responder = lambda _query: SearchPage(
+            1, (LogEntry({"_id": "m1", "msg": "hi"}, index="idx_1"),)
+        )
+
+        result = self.service.search_recent(
+            text="*", stream_id="s1", seconds=60, limit=5, include_references=True
+        )
+
+        self.assertEqual(result["references"], [{"index": "idx_1", "message_id": "m1"}])
 
     def test_absolute_search(self):
         result = self.service.search_between(text="*", stream_id="s1", start="a", end="b", limit=5)

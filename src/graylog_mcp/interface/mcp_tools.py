@@ -14,6 +14,7 @@ from mcp.server.mcpserver import MCPServer
 from ..application.alerts import AlertService
 from ..application.analytics import AnalyticsService
 from ..application.configuration import ConfigurationService
+from ..application.incident import IncidentService
 from ..application.operations import OperationsService
 from ..application.saved_views import SavedViewService
 from ..application.service import LogService
@@ -21,6 +22,7 @@ from . import (
     tools_alerts,
     tools_analytics,
     tools_configuration,
+    tools_incident,
     tools_operations,
     tools_search,
     tools_views,
@@ -55,4 +57,14 @@ def build_server(
     tools_views.register(server, services.views)
     tools_operations.register(server, services.operations)
     tools_configuration.register(server, services.configuration)
+    tools_incident.register(
+        server,
+        IncidentService(
+            search=services.search,
+            analytics=services.analytics,
+            alerts=services.alerts,
+            operations=services.operations,
+            configuration=services.configuration,
+        ),
+    )
     return server

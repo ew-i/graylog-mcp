@@ -31,6 +31,11 @@ def _unwrap(hit: dict[str, Any]) -> dict[str, Any]:
     return inner if isinstance(inner, dict) else hit
 
 
+def _index(hit: dict[str, Any]) -> str | None:
+    value = hit.get("index")
+    return str(value) if value is not None else None
+
+
 class GraylogStore:
     def __init__(self, client: httpx.Client) -> None:
         self._api = GraylogApi(client)
@@ -65,12 +70,15 @@ class GraylogStore:
         body = self._api.get_object(
             _SEARCH_PATHS[type(query.window)], params=self._search_params(query)
         )
-        entries = tuple(LogEntry(_unwrap(hit)) for hit in objects(body.get("messages")))
+        entries = tuple(
+            LogEntry(_unwrap(hit), index=_index(hit)) for hit in objects(body.get("messages"))
+        )
         return SearchPage(total_hits=integer(body.get("total_results")) or 0, entries=entries)
 
     def fetch(self, index: str, message_id: str) -> LogEntry:
         return LogEntry(
-            _unwrap(self._api.get_object(f"/api/messages/{segment(index)}/{segment(message_id)}"))
+            _unwrap(self._api.get_object(f"/api/messages/{segment(index)}/{segment(message_id)}")),
+            index=index,
         )
 
     @staticmethod
