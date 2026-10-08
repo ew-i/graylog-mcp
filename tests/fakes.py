@@ -17,7 +17,15 @@ from graylog_mcp.domain.configuration import (
     StreamConfig,
 )
 from graylog_mcp.domain.errors import NotFoundError
-from graylog_mcp.domain.models import ClusterInfo, LogEntry, LogQuery, SearchPage, Stream
+from graylog_mcp.domain.models import (
+    ClusterInfo,
+    ListingPage,
+    ListingQuery,
+    LogEntry,
+    LogQuery,
+    SearchPage,
+    Stream,
+)
 from graylog_mcp.domain.operations import (
     InputStatus,
     NodeStatus,
@@ -25,6 +33,12 @@ from graylog_mcp.domain.operations import (
     SystemNotification,
 )
 from graylog_mcp.domain.views import SavedQuery, ViewSummary
+
+
+def _listing(items: list, query: ListingQuery) -> ListingPage:
+    """An offset-paged slice, as every fake store serves listings."""
+    page = tuple(items[query.offset : query.offset + query.limit])
+    return ListingPage(total=len(items), items=page, next_offset=query.offset + len(page))
 
 
 @dataclass
@@ -49,9 +63,11 @@ class FakeLogStore:
         self.queries.append(query)
         if self.responder:
             return self.responder(query)
-        hits = tuple(LogEntry(e) for e in self.entries[: query.max_results])
+        hits = tuple(
+            LogEntry(e) for e in self.entries[query.offset : query.offset + query.max_results]
+        )
         total = self.total_hits if self.total_hits is not None else len(self.entries)
-        return SearchPage(total_hits=total, entries=hits)
+        return SearchPage(total_hits=total, entries=hits, next_offset=query.offset + len(hits))
 
     def fetch(self, index: str, message_id: str) -> LogEntry:
         try:
@@ -80,7 +96,7 @@ class FakeAggregationStore:
 
 @dataclass
 class FakeAlertStore:
-    page: EventPage = field(default_factory=lambda: EventPage(0, ()))
+    page: EventPage = field(default_factory=lambda: EventPage(0, (), 0))
     definition_list: list[EventDefinition] = field(default_factory=list)
     queries: list[EventQuery] = field(default_factory=list)
     definition_requests: list[tuple[str, int]] = field(default_factory=list)
@@ -89,9 +105,9 @@ class FakeAlertStore:
         self.queries.append(query)
         return self.page
 
-    def definitions(self, text: str, limit: int) -> list[EventDefinition]:
-        self.definition_requests.append((text, limit))
-        return list(self.definition_list)
+    def definitions(self, query: ListingQuery) -> ListingPage:
+        self.definition_requests.append((query.text, query.limit))
+        return _listing(self.definition_list, query)
 
 
 @dataclass
@@ -100,11 +116,11 @@ class FakeViewStore:
     boards: list[ViewSummary] = field(default_factory=list)
     saved: dict[str, SavedQuery] = field(default_factory=dict)
 
-    def saved_searches(self, text: str, limit: int) -> list[ViewSummary]:
-        return self.searches[:limit]
+    def saved_searches(self, query: ListingQuery) -> ListingPage:
+        return _listing(self.searches, query)
 
-    def dashboards(self, text: str, limit: int) -> list[ViewSummary]:
-        return self.boards[:limit]
+    def dashboards(self, query: ListingQuery) -> ListingPage:
+        return _listing(self.boards, query)
 
     def saved_query(self, view_id: str) -> SavedQuery:
         try:
@@ -161,8 +177,8 @@ class FakeConfigStore:
     def index_sets(self) -> list[IndexSet]:
         return list(self.sets)
 
-    def lookup_tables(self, text: str, limit: int) -> list[LookupTable]:
-        return self.tables[:limit]
+    def lookup_tables(self, query: ListingQuery) -> ListingPage:
+        return _listing(self.tables, query)
 
     def lookup(self, table: str, key: str) -> LookupResult:
         try:

@@ -37,3 +37,10 @@ class BackendUnavailableError(BackendError):
 
 class UnsupportedError(BackendError):
     """The backend version does not offer the requested capability."""
+
+
+def error_payload(exc: Exception) -> dict[str, str]:
+    """The {"error", "kind"} payload clients see; unexpected exceptions get kind ``Internal``."""
+    if isinstance(exc, GraylogMcpError):
+        return {"error": str(exc), "kind": exc.kind}
+    return {"error": f"Unexpected {type(exc).__name__}: {exc}", "kind": "Internal"}

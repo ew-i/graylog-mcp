@@ -5,6 +5,7 @@ from graylog_mcp.domain.errors import InvalidRequestError
 from graylog_mcp.domain.models import (
     Between,
     LastSeconds,
+    ListingQuery,
     LogEntry,
     LogQuery,
     Sort,
@@ -64,6 +65,19 @@ class LogQueryTest(unittest.TestCase):
         with self.assertRaises(InvalidRequestError):
             self._make(max_results=0)
 
+    def test_negative_offset_rejected(self):
+        with self.assertRaises(InvalidRequestError):
+            self._make(offset=-1)
+
+
+class ListingQueryTest(unittest.TestCase):
+    def test_defaults_and_bounds(self):
+        self.assertEqual(ListingQuery(5), ListingQuery(limit=5, text="", offset=0))
+        with self.assertRaises(InvalidRequestError):
+            ListingQuery(0)
+        with self.assertRaises(InvalidRequestError):
+            ListingQuery(5, offset=-1)
+
 
 class LogEntryTest(unittest.TestCase):
     entry = LogEntry(
@@ -75,6 +89,13 @@ class LogEntryTest(unittest.TestCase):
 
     def test_explicit_selection_can_include_internal_fields(self):
         self.assertEqual(self.entry.visible(("_id", "msg", "absent")), {"_id": "x", "msg": "boom"})
+
+    def test_listed_adds_index_and_id_when_known(self):
+        entry = LogEntry({"_id": "x", "msg": "boom"}, index="graylog_0")
+        self.assertEqual(
+            entry.listed(("msg",)), {"msg": "boom", "_index": "graylog_0", "_id": "x"}
+        )
+        self.assertEqual(LogEntry({"msg": "boom"}).listed(), {"msg": "boom"})
 
 
 class AnalysisTest(unittest.TestCase):

@@ -19,6 +19,7 @@ from graylog_mcp.infrastructure.graylog_api import (
     objects,
     text,
     timerange_json,
+    total_count,
 )
 from graylog_mcp.infrastructure.graylog_http import GraylogStore, build_http_client
 
@@ -69,12 +70,26 @@ class ReadEndpointsTest(unittest.TestCase):
         self.assertTrue(streams[0].is_default)
         self.assertTrue(streams[1].disabled)
 
-    def test_fetch_unwraps_and_escapes_path(self):
-        store, rec = store_with(ok({"index": "i", "message": {"_id": "m/1", "msg": "x"}}))
+    def test_fetch_unwraps_message_fields_and_escapes_path(self):
+        # Shape returned by GET /api/messages/{index}/{id} on Graylog 7.
+        body = {
+            "index": "idx",
+            "message": {
+                "fields": {"_id": "m/1", "msg": "x", "sequence": 17},
+                "id": "m/1",
+                "field_names": ["_id", "msg", "sequence"],
+                "journal_offset": -1,
+            },
+        }
+        store, rec = store_with(ok(body))
         entry = store.fetch("idx", "m/1")
-        self.assertEqual(entry.fields["msg"], "x")
+        self.assertEqual(entry.fields, {"_id": "m/1", "msg": "x", "sequence": 17})
         self.assertEqual(entry.index, "idx")
         self.assertEqual(rec.requests[0].url.raw_path, b"/api/messages/idx/m%2F1")
+
+    def test_fetch_accepts_flat_message(self):
+        store, _ = store_with(ok({"message": {"_id": "m1", "msg": "x"}}))
+        self.assertEqual(store.fetch("idx", "m1").fields, {"_id": "m1", "msg": "x"})
 
 
 class SearchTest(unittest.TestCase):
@@ -111,6 +126,20 @@ class SearchTest(unittest.TestCase):
         self.assertEqual(page.total_hits, 42)
         self.assertEqual([e.fields["msg"] for e in page.entries], ["a", "b"])
 
+    def test_next_offset_counts_every_hit_sent_including_malformed(self):
+        body = {"total_results": 9, "messages": [{"message": {"msg": "a"}}, "junk"]}
+        store, _ = store_with(ok(body))
+        page = store.search(
+            LogQuery(text="*", stream_id="s1", window=LastSeconds(60), max_results=2, offset=4)
+        )
+        self.assertEqual((len(page.entries), page.next_offset), (1, 6))
+
+        store, _ = store_with(ok({"total_results": 9}))
+        page = store.search(
+            LogQuery(text="*", stream_id="s1", window=LastSeconds(60), max_results=2)
+        )
+        self.assertEqual(page.next_offset, 0)
+
     def test_absolute_search_params(self):
         store, rec = store_with(ok(self.body))
         store.search(LogQuery(text="*", stream_id="s1", window=Between("t0", "t1"), max_results=1))
@@ -119,6 +148,21 @@ class SearchTest(unittest.TestCase):
         self.assertEqual((params["from"], params["to"]), ("t0", "t1"))
         self.assertNotIn("range", params)
         self.assertNotIn("fields", params)
+
+    def test_search_offset_does_not_replace_absolute_window(self):
+        store, rec = store_with(ok(self.body))
+        store.search(
+            LogQuery(
+                text="*",
+                stream_id="s1",
+                window=Between("t0", "t1"),
+                max_results=1,
+                offset=4,
+            )
+        )
+        params = dict(rec.requests[0].url.params)
+        self.assertEqual(params["offset"], "4")
+        self.assertEqual((params["from"], params["to"]), ("t0", "t1"))
 
 
 class ErrorMappingTest(unittest.TestCase):
@@ -178,6 +222,11 @@ class ClientFactoryTest(unittest.TestCase):
         self.assertIsNone(integer("x"))
         self.assertEqual(number("1.5"), 1.5)
         self.assertIsNone(number(False))
+
+    def test_total_count_variants(self):
+        self.assertEqual(total_count({"total": 3}, "total"), 3)
+        self.assertEqual(total_count({"pagination": {"total": 4}}), 4)
+        self.assertIsNone(total_count({"other": 1}, "total"))
         self.assertIsNone(number(object()))
         self.assertEqual(objects([{}, "x"]), [{}])
         self.assertEqual(objects("x"), [])

@@ -95,11 +95,14 @@ class LogQuery:
     max_results: int
     sort: Sort = field(default_factory=Sort)
     only_fields: tuple[str, ...] = ()
+    offset: int = 0
 
     def __post_init__(self) -> None:
         require_scope(self.text, self.stream_id)
         if self.max_results < 1:
             raise InvalidRequestError("max_results must be positive")
+        if self.offset < 0:
+            raise InvalidRequestError("offset must not be negative")
 
 
 @dataclass(frozen=True)
@@ -127,11 +130,49 @@ class LogEntry:
             if name not in self._HIDDEN_KEYS and not name.startswith(self._HIDDEN_PREFIXES)
         }
 
+    def listed(self, only: tuple[str, ...] = ()) -> JsonDict:
+        """`visible` plus the `_index` and `_id` needed to fetch the message again."""
+        result = self.visible(only)
+        if self.index:
+            result["_index"] = self.index
+        message_id = self.fields.get("_id")
+        if message_id is not None:
+            result["_id"] = message_id
+        return result
+
+
+@dataclass(frozen=True)
+class ListingQuery:
+    """One page of a catalogue listing (alert definitions, saved searches, ...)."""
+
+    limit: int
+    text: str = ""
+    offset: int = 0
+
+    def __post_init__(self) -> None:
+        if self.limit < 1:
+            raise InvalidRequestError("limit must be positive")
+        if self.offset < 0:
+            raise InvalidRequestError("offset must not be negative")
+
 
 @dataclass(frozen=True)
 class SearchPage:
+    """One page of matches. `next_offset` is where the following page starts:
+    the store sets it, because only it knows how its backend pages."""
+
     total_hits: int
     entries: tuple[LogEntry, ...]
+    next_offset: int
+
+
+@dataclass(frozen=True)
+class ListingPage:
+    """One page of a listing; `next_offset` as for `SearchPage`."""
+
+    total: int
+    items: tuple[Any, ...]
+    next_offset: int
 
 
 @dataclass(frozen=True)

@@ -114,6 +114,10 @@ class AlertModelTest(unittest.TestCase):
         with self.assertRaises(InvalidRequestError):
             EventQuery(window=LastSeconds(60), limit=0)
 
+    def test_event_query_offset(self):
+        with self.assertRaises(InvalidRequestError):
+            EventQuery(window=LastSeconds(60), limit=1, offset=-1)
+
 
 class StreamRuleTest(unittest.TestCase):
     def rule(self, code, value="3", inverted=False, field="level"):

@@ -16,12 +16,17 @@ def register(server: MCPServer, service: LogService) -> None:
         return _respond(service.cluster_info)
 
     @server.tool()
-    def browse_streams() -> str:
+    def browse_streams(limit: int = 50, next_cursor: str = "") -> str:
         """List the log streams you may query, with their IDs.
 
         Call this before any search: every search, aggregation and field
-        lookup needs a stream_id from this list."""
-        return _respond(service.streams)
+        lookup needs a stream_id from this list.
+
+        Args:
+            limit: Maximum streams returned (1-200).
+            next_cursor: A previous response's next_cursor. Continues that exact request:
+                filters, time range and page size come from the cursor."""
+        return _respond(lambda: service.streams(limit=limit, next_cursor=next_cursor))
 
     @server.tool()
     def find_recent_logs(
@@ -32,8 +37,13 @@ def register(server: MCPServer, service: LogService) -> None:
         fields: str = "",
         sort: str = "timestamp",
         sort_order: str = "desc",
+        next_cursor: str = "",
     ) -> str:
         """Search messages from the last N seconds.
+
+        The window is fixed when the first page is fetched, so later pages
+        (via next_cursor) cover the same messages even as new ones arrive.
+        Each message carries _index and _id for read_log_message and message_context.
 
         Args:
             query: Lucene query, e.g. 'level:error AND source:api'.
@@ -43,6 +53,8 @@ def register(server: MCPServer, service: LogService) -> None:
             fields: Optional comma-separated field names to return.
             sort: Field to sort on.
             sort_order: 'asc' or 'desc'.
+            next_cursor: A previous response's next_cursor. Continues that exact request:
+                filters, time range and page size come from the cursor.
         """
         return _respond(
             lambda: service.search_recent(
@@ -53,6 +65,7 @@ def register(server: MCPServer, service: LogService) -> None:
                 fields=fields,
                 sort_field=sort,
                 sort_order=sort_order,
+                next_cursor=next_cursor,
             )
         )
 
@@ -66,9 +79,12 @@ def register(server: MCPServer, service: LogService) -> None:
         fields: str = "",
         sort: str = "timestamp",
         sort_order: str = "desc",
+        next_cursor: str = "",
     ) -> str:
         """Search messages between two ISO-8601 timestamps
         (e.g. '2026-03-15T00:00:00.000Z').
+
+        Each message carries _index and _id for read_log_message and message_context.
 
         Args:
             query: Lucene query.
@@ -79,6 +95,8 @@ def register(server: MCPServer, service: LogService) -> None:
             fields: Optional comma-separated field names to return.
             sort: Field to sort on.
             sort_order: 'asc' or 'desc'.
+            next_cursor: A previous response's next_cursor. Continues that exact request:
+                filters, time range and page size come from the cursor.
         """
         return _respond(
             lambda: service.search_between(
@@ -90,15 +108,16 @@ def register(server: MCPServer, service: LogService) -> None:
                 fields=fields,
                 sort_field=sort,
                 sort_order=sort_order,
+                next_cursor=next_cursor,
             )
         )
 
     @server.tool()
     def read_log_message(index: str, message_id: str, fields: str = "") -> str:
-        """Fetch one message in full, using the index and _id seen in search results.
+        """Fetch one message in full, using the _index and _id seen in search results.
 
         Args:
-            index: Index holding the message.
+            index: The message's _index.
             message_id: The message's _id.
             fields: Optional comma-separated field names to return.
         """

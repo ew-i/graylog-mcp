@@ -6,7 +6,8 @@ from dataclasses import asdict
 
 from ..domain.errors import InvalidRequestError
 from ..domain.models import Between, JsonDict, LastSeconds
-from .policy import Limits, clamp
+from .pagination import listing
+from .policy import Limits
 from .ports import ViewStore
 from .service import LogService
 
@@ -19,16 +20,48 @@ class SavedViewService:
         self._search = search
         self._limits = limits or Limits()
 
-    def saved_searches(self, *, text: str = "", limit: int = 50) -> JsonDict:
-        items = self._views.saved_searches(text.strip(), clamp(limit, 1, self._limits.max_listing))
-        return {"total": len(items), "saved_searches": [asdict(i) for i in items]}
+    def saved_searches(
+        self, *, text: str = "", limit: int = 50, next_cursor: str = ""
+    ) -> JsonDict:
+        found, paging = listing(
+            "saved_searches",
+            next_cursor,
+            text=text,
+            limit=limit,
+            max_limit=self._limits.max_listing,
+            fetch=self._views.saved_searches,
+        )
+        return {
+            "total": found.total,
+            "returned": len(found.items),
+            "saved_searches": [asdict(i) for i in found.items],
+            **paging,
+        }
 
-    def dashboards(self, *, text: str = "", limit: int = 50) -> JsonDict:
-        items = self._views.dashboards(text.strip(), clamp(limit, 1, self._limits.max_listing))
-        return {"total": len(items), "dashboards": [asdict(i) for i in items]}
+    def dashboards(self, *, text: str = "", limit: int = 50, next_cursor: str = "") -> JsonDict:
+        found, paging = listing(
+            "dashboards",
+            next_cursor,
+            text=text,
+            limit=limit,
+            max_limit=self._limits.max_listing,
+            fetch=self._views.dashboards,
+        )
+        return {
+            "total": found.total,
+            "returned": len(found.items),
+            "dashboards": [asdict(i) for i in found.items],
+            **paging,
+        }
 
     def run_saved_search(
-        self, *, view_id: str, stream_id: str = "", limit: int = 50, fields: str = ""
+        self,
+        *,
+        view_id: str,
+        stream_id: str = "",
+        limit: int = 50,
+        fields: str = "",
+        next_cursor: str = "",
     ) -> JsonDict:
         if not view_id.strip():
             raise InvalidRequestError("view_id is required; call saved_searches to find one")
@@ -36,7 +69,7 @@ class SavedViewService:
         notes: list[str] = []
 
         chosen = stream_id.strip()
-        if not chosen:
+        if not chosen and not next_cursor:
             if not saved.stream_ids:
                 raise InvalidRequestError(
                     "this saved search is not limited to a stream; "
@@ -59,6 +92,7 @@ class SavedViewService:
                 end=window.end,
                 limit=limit,
                 fields=fields,
+                next_cursor=next_cursor,
             )
         else:
             seconds = window.seconds if isinstance(window, LastSeconds) else _FALLBACK_SECONDS
@@ -68,7 +102,12 @@ class SavedViewService:
                     f"the last {_FALLBACK_SECONDS} seconds."
                 )
             result = self._search.search_recent(
-                text=text, stream_id=chosen, seconds=seconds, limit=limit, fields=fields
+                text=text,
+                stream_id=chosen,
+                seconds=seconds,
+                limit=limit,
+                fields=fields,
+                next_cursor=next_cursor,
             )
 
         return {
@@ -79,7 +118,7 @@ class SavedViewService:
                 "stream_ids": list(saved.stream_ids),
                 "window": window.describe() if window else {"keyword": saved.keyword},
             },
-            "stream_id": chosen,
+            "stream_id": result["stream_id"],
             "notes": notes,
             "result": result,
         }

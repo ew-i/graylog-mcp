@@ -11,7 +11,7 @@ search, analysis, alerts, saved searches, cluster health and configuration.
 |---------------|------------------------------------------|-------------------------------------------------------------------------|--------------------|
 | Search        | `cluster_status`                         | Version, node, timezone, processing state                               |                    |
 |               | `browse_streams`                         | Streams you may query, with IDs — call first                            |                    |
-|               | `find_recent_logs` / `find_logs_between` | Message search, relative or absolute window                             |                    |
+|               | `find_recent_logs` / `find_logs_between` | Message search; each hit carries `_index` and `_id`                     |                    |
 |               | `read_log_message`                       | One message in full                                                     |                    |
 |               | `rank_field_values`                      | Top values from a sample of ≤1000 newest matches                        |                    |
 |               | `discover_fields`                        | Field names seen in recent messages                                     |                    |
@@ -39,7 +39,18 @@ search, analysis, alerts, saved searches, cluster health and configuration.
 `{"kind": "Unsupported", ...}`; the rest keep working. **Needs** lists the token
 permissions beyond reading streams; without them a tool returns `{"kind": "AccessDenied"}`.
 
-All tools are read-only. Failures never raise: they return `{"error": ..., "kind": ...}`.
+All tools are read-only. Paginated logs, events, streams, dashboards, saved
+searches, alert definitions, and lookup tables return `limit`, `next_cursor`,
+`has_more`, and `truncated`; pass `next_cursor` to fetch the next page. The
+cursor carries the original request, so later pages repeat it exactly; a
+relative time range is pinned to absolute timestamps on the first page, so
+paging never shifts while new messages arrive. `truncated` (with a
+`truncation` explanation) means results are missing that paging alone will not
+recover as asked: the requested limit exceeded the maximum page size, or the
+matches go deeper than Graylog can page (10,000 for logs and events).
+Failures never raise: they return `{"error": ..., "kind": ...}`. An unexpected
+internal error has kind `Internal` and is logged with its traceback to stderr;
+in `investigate_incident` it replaces only the failing section.
 
 ## Layout
 
@@ -122,6 +133,8 @@ the MCP SDK's `:*` port wildcard, such as `localhost:*` or
 
 Settings are also read from `.env`. Precedence is CLI
 arguments, process environment variables, `.env`, then the declared defaults.
+A CLI argument replaces its environment value entirely, so an invalid
+environment value does not block startup when the matching flag is given.
 
 ## Run
 

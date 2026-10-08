@@ -19,8 +19,10 @@ class IncidentServiceTest(unittest.TestCase):
         self.search.search_recent.return_value = {
             "total_results": 4,
             "returned": 1,
-            "messages": [{"message": "boom"}],
-            "references": [{"index": "graylog_1", "message_id": "m1"}],
+            "messages": [
+                {"message": "no reference"},
+                {"message": "boom", "_index": "graylog_1", "_id": "m1"},
+            ],
         }
         self.search.cluster_info.return_value = {"version": "6.1"}
         self.operations.cluster_nodes.return_value = {"healthy": 1}
@@ -49,7 +51,10 @@ class IncidentServiceTest(unittest.TestCase):
         self.assertEqual(
             result["cluster_health"], {"status": {"version": "6.1"}, "nodes": {"healthy": 1}}
         )
-        self.assertEqual(result["representative_messages"]["messages"], [{"message": "boom"}])
+        self.assertEqual(
+            result["representative_messages"]["messages"][1],
+            {"message": "boom", "_index": "graylog_1", "_id": "m1"},
+        )
         self.assertEqual(result["nearby_context"], {"before": [], "after": []})
         self.assertEqual(
             set(result["top_values"]), {"source", "service", "level", "http_response_code"}
@@ -59,7 +64,6 @@ class IncidentServiceTest(unittest.TestCase):
             stream_id="s1",
             seconds=600,
             limit=2,
-            include_references=True,
         )
         self.analytics.message_context.assert_called_once_with(
             index="graylog_1",
@@ -74,7 +78,7 @@ class IncidentServiceTest(unittest.TestCase):
 
     def test_keeps_other_sections_when_one_backend_capability_fails(self):
         self.search.cluster_info.side_effect = UnsupportedError("cluster unavailable")
-        self.search.search_recent.return_value = {"messages": [], "references": []}
+        self.search.search_recent.return_value = {"messages": []}
         self.configuration.stream_rules.side_effect = UnsupportedError("stream unavailable")
 
         result = self.service.investigate(query="*", stream_id="s1")
@@ -83,6 +87,22 @@ class IncidentServiceTest(unittest.TestCase):
         self.assertEqual(result["configuration"]["stream"]["kind"], "Unsupported")
         self.assertEqual(result["recent_alerts"], {"total": 1})
         self.assertIsNone(result["nearby_context"])
+
+    def test_unexpected_error_replaces_only_its_section(self):
+        self.alerts.recent_alerts.side_effect = AttributeError("'list' object has no attribute")
+
+        with self.assertLogs("graylog_mcp.application.incident", level="ERROR"):
+            result = self.service.investigate(query="*", stream_id="s1")
+
+        self.assertEqual(
+            result["recent_alerts"],
+            {
+                "error": "Unexpected AttributeError: 'list' object has no attribute",
+                "kind": "Internal",
+            },
+        )
+        self.assertEqual(result["configuration"]["pipelines"], {"total": 1})
+        self.assertEqual(result["nearby_context"], {"before": [], "after": []})
 
 
 if __name__ == "__main__":

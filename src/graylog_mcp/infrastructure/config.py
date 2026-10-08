@@ -8,7 +8,6 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import (
     Field,
     PositiveFloat,
-    PositiveInt,
     ValidationError,
     ValidationInfo,
     field_validator,
@@ -46,7 +45,7 @@ class Settings(BaseSettings):
     log_level: LogLevel = Field("INFO", validation_alias="MCP_LOG_LEVEL")
     transport: Transport = Field("stdio", validation_alias="MCP_TRANSPORT")
     host: str = Field("127.0.0.1", validation_alias="MCP_HOST")
-    port: PositiveInt = Field(8000, validation_alias="MCP_PORT")
+    port: int = Field(8000, ge=1, le=65535, validation_alias="MCP_PORT")
     streamable_http_path: str = Field("/mcp", validation_alias="MCP_STREAMABLE_HTTP_PATH")
     enable_dns_rebinding_protection: bool = Field(
         False, validation_alias="MCP_ENABLE_DNS_REBINDING_PROTECTION"
@@ -126,5 +125,8 @@ def _split_csv(value: str) -> list[str]:
 
 def settings_error(exc: ValidationError) -> ConfigError:
     """Turn Pydantic's structured errors into the application's config error."""
-    messages = "; ".join(error["msg"] for error in exc.errors())
+    messages = "; ".join(
+        f"{'.'.join(map(str, error['loc']))}: {error['msg']}" if error["loc"] else error["msg"]
+        for error in exc.errors()
+    )
     return ConfigError(messages)

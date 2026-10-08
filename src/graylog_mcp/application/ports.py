@@ -2,6 +2,10 @@
 
 Implementations must signal failure only with
 `graylog_mcp.domain.errors.BackendError` (or subclasses).
+
+Paging is by offset everywhere. A store whose backend pages by number
+converts the offset itself and reports where the next page starts in the
+result's `next_offset`, so use cases never see the backend's paging style.
 """
 
 from __future__ import annotations
@@ -9,19 +13,26 @@ from __future__ import annotations
 from typing import Protocol
 
 from ..domain.aggregation import AggregationQuery, AggregationTable
-from ..domain.alerts import EventDefinition, EventPage, EventQuery
+from ..domain.alerts import EventPage, EventQuery
 from ..domain.configuration import (
     IndexSet,
     LookupResult,
-    LookupTable,
     Pipeline,
     PipelineConnection,
     PipelineRule,
     StreamConfig,
 )
-from ..domain.models import ClusterInfo, LogEntry, LogQuery, SearchPage, Stream
+from ..domain.models import (
+    ClusterInfo,
+    ListingPage,
+    ListingQuery,
+    LogEntry,
+    LogQuery,
+    SearchPage,
+    Stream,
+)
 from ..domain.operations import InputStatus, NodeStatus, NodeThroughput, SystemNotification
-from ..domain.views import SavedQuery, ViewSummary
+from ..domain.views import SavedQuery
 
 
 class LogStore(Protocol):
@@ -45,13 +56,13 @@ class AggregationStore(Protocol):
 class AlertStore(Protocol):
     def events(self, query: EventQuery) -> EventPage: ...
 
-    def definitions(self, text: str, limit: int) -> list[EventDefinition]: ...
+    def definitions(self, query: ListingQuery) -> ListingPage: ...
 
 
 class ViewStore(Protocol):
-    def saved_searches(self, text: str, limit: int) -> list[ViewSummary]: ...
+    def saved_searches(self, query: ListingQuery) -> ListingPage: ...
 
-    def dashboards(self, text: str, limit: int) -> list[ViewSummary]: ...
+    def dashboards(self, query: ListingQuery) -> ListingPage: ...
 
     def saved_query(self, view_id: str) -> SavedQuery: ...
 
@@ -77,6 +88,6 @@ class ConfigStore(Protocol):
 
     def index_sets(self) -> list[IndexSet]: ...
 
-    def lookup_tables(self, text: str, limit: int) -> list[LookupTable]: ...
+    def lookup_tables(self, query: ListingQuery) -> ListingPage: ...
 
     def lookup(self, table: str, key: str) -> LookupResult: ...

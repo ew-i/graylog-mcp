@@ -20,7 +20,8 @@ from ..domain.models import (
     SortDirection,
     TimeWindow,
 )
-from .policy import Limits, parse_field_list
+from .pagination import open_page, page_metadata, pinned_window
+from .policy import Clock, Limits, parse_field_list, utc_now
 from .policy import clamp as _clamp
 from .ports import LogStore
 
@@ -28,22 +29,33 @@ __all__ = ["Limits", "LogService", "parse_field_list"]
 
 
 class LogService:
-    def __init__(self, store: LogStore, limits: Limits | None = None) -> None:
+    def __init__(
+        self, store: LogStore, limits: Limits | None = None, clock: Clock = utc_now
+    ) -> None:
         self._store = store
         self._limits = limits or Limits()
+        self._clock = clock
 
     # -- cluster / catalogue -------------------------------------------------
 
     def cluster_info(self) -> JsonDict:
         return asdict(self._store.cluster_info())
 
-    def streams(self) -> JsonDict:
+    def streams(self, *, limit: int = 50, next_cursor: str = "") -> JsonDict:
+        page = open_page("streams", next_cursor, limit=limit, max_limit=self._limits.max_listing)
         visible = [
             {"id": s.id, "title": s.title, "description": s.description, "disabled": s.disabled}
             for s in self._store.streams()
             if not s.is_default
         ]
-        return {"total": len(visible), "streams": visible}
+        items = visible[page.offset : page.offset + page.limit]
+        # ponytail: slice locally until Graylog's streams endpoint exposes pages.
+        return {
+            "total": len(visible),
+            "returned": len(items),
+            "streams": items,
+            **page_metadata(page, len(items), len(visible), next_offset=page.offset + len(items)),
+        }
 
     # -- search --------------------------------------------------------------
 
@@ -57,18 +69,11 @@ class LogService:
         fields: str = "",
         sort_field: str = "timestamp",
         sort_order: str = "desc",
-        include_references: bool = False,
+        next_cursor: str = "",
     ) -> JsonDict:
         window = LastSeconds(_clamp(seconds, 1, self._limits.max_window_seconds))
         return self._search(
-            text,
-            stream_id,
-            window,
-            limit,
-            fields,
-            sort_field,
-            sort_order,
-            include_references,
+            window, text, stream_id, limit, fields, sort_field, sort_order, next_cursor
         )
 
     def search_between(
@@ -82,46 +87,69 @@ class LogService:
         fields: str = "",
         sort_field: str = "timestamp",
         sort_order: str = "desc",
+        next_cursor: str = "",
     ) -> JsonDict:
         return self._search(
-            text, stream_id, Between(start, end), limit, fields, sort_field, sort_order
+            Between(start, end),
+            text,
+            stream_id,
+            limit,
+            fields,
+            sort_field,
+            sort_order,
+            next_cursor,
         )
 
     def _search(
         self,
+        window: TimeWindow,
         text: str,
         stream_id: str,
-        window: TimeWindow,
         limit: int,
         fields: str,
         sort_field: str,
         sort_order: str,
-        include_references: bool = False,
+        next_cursor: str,
     ) -> JsonDict:
-        query = LogQuery(
-            text=text,
-            stream_id=stream_id,
-            window=window,
-            max_results=_clamp(limit, 1, self._limits.max_results),
-            sort=Sort(sort_field, SortDirection.parse(sort_order)),
-            only_fields=parse_field_list(fields),
+        page = open_page(
+            "search",
+            next_cursor,
+            limit=limit,
+            max_limit=self._limits.max_results,
+            match={"text": text.strip(), "stream_id": stream_id.strip()},
+            details=lambda: {
+                "window": pinned_window(window, self._clock()),
+                "fields": list(parse_field_list(fields)),
+                "sort_field": sort_field.strip(),
+                "sort_order": SortDirection.parse(sort_order).value,
+            },
         )
-        page = self._store.search(query)
-        messages = [entry.visible(query.only_fields) for entry in page.entries]
-        result: JsonDict = {
+        query = LogQuery(
+            text=page.value("text"),
+            stream_id=page.value("stream_id"),
+            window=page.window(),
+            max_results=page.limit,
+            offset=page.offset,
+            sort=Sort(page.value("sort_field"), SortDirection.parse(page.value("sort_order"))),
+            only_fields=parse_field_list(",".join(map(str, page.value("fields", list)))),
+        )
+        found = self._store.search(query)
+        messages = [entry.listed(query.only_fields) for entry in found.entries]
+        return {
             "query": query.text,
-            "window": window.describe(),
-            "total_results": page.total_hits,
+            "stream_id": query.stream_id,
+            "window": page.request["window"],
+            "total_results": found.total_hits,
             "returned": len(messages),
             "messages": messages,
+            **page_metadata(
+                page,
+                len(messages),
+                found.total_hits,
+                next_offset=found.next_offset,
+                reachable=self._limits.max_result_window,
+            ),
         }
-        if include_references:
-            result["references"] = [
-                {"index": entry.index, "message_id": entry.fields.get("_id")}
-                for entry in page.entries
-                if entry.index and entry.fields.get("_id")
-            ]
-        return result
 
     # -- single message ------------------------------------------------------
 

@@ -8,9 +8,18 @@ from typing import Any
 import httpx
 
 from ..domain.errors import InvalidRequestError
-from ..domain.models import Between, LastSeconds, TimeWindow
+from ..domain.models import Between, LastSeconds, ListingPage, ListingQuery, TimeWindow
 from ..domain.views import SavedQuery, ViewSummary
-from .graylog_api import GraylogApi, first_list, integer, objects, segment, text
+from .graylog_api import (
+    GraylogApi,
+    first_list,
+    integer,
+    objects,
+    page_number,
+    segment,
+    text,
+    total_count,
+)
 
 _LIST_KEYS = ("elements", "views", "dashboards", "saved_searches", "result")
 
@@ -60,17 +69,25 @@ class GraylogViewStore:
     def __init__(self, client: httpx.Client) -> None:
         self._api = GraylogApi(client)
 
-    def _listing(self, path: str, query: str, limit: int) -> list[ViewSummary]:
-        params: dict[str, Any] = {"page": 1, "per_page": limit, "sort": "title", "order": "asc"}
-        if query:
-            params["query"] = query
-        return [_summary(i) for i in first_list(self._api.get_object(path, params), _LIST_KEYS)]
+    def _listing(self, path: str, query: ListingQuery) -> ListingPage:
+        params: dict[str, Any] = {
+            "page": page_number(query.offset, query.limit),
+            "per_page": query.limit,
+            "sort": "title",
+            "order": "asc",
+        }
+        if query.text:
+            params["query"] = query.text
+        body = self._api.get_object(path, params)
+        items = tuple(_summary(i) for i in first_list(body, _LIST_KEYS))
+        total = total_count(body, "total", "count") or len(items)
+        return ListingPage(total=total, items=items, next_offset=query.offset + query.limit)
 
-    def saved_searches(self, text_query: str, limit: int) -> list[ViewSummary]:
-        return self._listing("/api/search/saved", text_query, limit)
+    def saved_searches(self, query: ListingQuery) -> ListingPage:
+        return self._listing("/api/search/saved", query)
 
-    def dashboards(self, text_query: str, limit: int) -> list[ViewSummary]:
-        return self._listing("/api/dashboards", text_query, limit)
+    def dashboards(self, query: ListingQuery) -> ListingPage:
+        return self._listing("/api/dashboards", query)
 
     def saved_query(self, view_id: str) -> SavedQuery:
         view = self._api.get_object(f"/api/views/{segment(view_id)}")

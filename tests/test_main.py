@@ -126,9 +126,34 @@ class CompositionRootTest(unittest.TestCase):
                 },
                 clear=True,
             ),
-            self.assertRaisesRegex(entry.ConfigError, "valid number"),
+            self.assertRaisesRegex(entry.ConfigError, "timeout_seconds: .*valid number"),
         ):
             entry.parse_args([])
+
+    def test_cli_flag_replaces_an_invalid_environment_value(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GRAYLOG_BASE_URL": "https://gl.example",
+                "GRAYLOG_API_TOKEN": "token",
+                "GRAYLOG_TIMEOUT_SECONDS": "soon",
+                "MCP_PORT": "http",
+            },
+            clear=True,
+        ):
+            settings = entry.parse_args(["--timeout-seconds", "5", "--port", "9000"])
+        self.assertEqual((settings.timeout_seconds, settings.port), (5.0, 9000))
+
+    def test_out_of_range_port_is_rejected_at_startup(self):
+        with (
+            patch.dict(
+                os.environ,
+                {"GRAYLOG_BASE_URL": "https://gl.example", "GRAYLOG_API_TOKEN": "token"},
+                clear=True,
+            ),
+            self.assertRaisesRegex(entry.ConfigError, "port: Input should be less than or equal"),
+        ):
+            entry.parse_args(["--port", "70000"])
 
     def test_invalid_cli_setting_is_reported_as_config_error(self):
         with (

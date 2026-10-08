@@ -6,7 +6,8 @@ from dataclasses import asdict
 
 from ..domain.errors import InvalidRequestError
 from ..domain.models import JsonDict
-from .policy import Limits, clamp
+from .pagination import listing
+from .policy import Limits
 from .ports import ConfigStore
 
 
@@ -106,9 +107,21 @@ class ConfigurationService:
             rows.sort(key=lambda r: not r["used_by_stream"])
         return {"stream_id": stream_id.strip() or None, "total": len(rows), "index_sets": rows}
 
-    def lookup_tables(self, *, text: str = "", limit: int = 50) -> JsonDict:
-        tables = self._store.lookup_tables(text.strip(), clamp(limit, 1, self._limits.max_listing))
-        return {"total": len(tables), "lookup_tables": [asdict(t) for t in tables]}
+    def lookup_tables(self, *, text: str = "", limit: int = 50, next_cursor: str = "") -> JsonDict:
+        found, paging = listing(
+            "lookup_tables",
+            next_cursor,
+            text=text,
+            limit=limit,
+            max_limit=self._limits.max_listing,
+            fetch=self._store.lookup_tables,
+        )
+        return {
+            "total": found.total,
+            "returned": len(found.items),
+            "lookup_tables": [asdict(t) for t in found.items],
+            **paging,
+        }
 
     def lookup_value(self, *, table: str, key: str) -> JsonDict:
         result = self._store.lookup(_require(table, "table"), _require(key, "key"))

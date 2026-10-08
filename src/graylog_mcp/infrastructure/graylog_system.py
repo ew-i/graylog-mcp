@@ -153,34 +153,24 @@ class GraylogSystemStore:
         }
         out = []
         for node_id in dict.fromkeys([*overviews, *registry]):
-            overview = overviews.get(node_id)
+            # A node missing from /api/cluster is registered but did not answer.
+            reachable = isinstance(overviews.get(node_id), dict)
+            overview = overviews[node_id] if reachable else {}
             entry = registry.get(node_id, {})
             leader = entry.get("is_leader", entry.get("is_master"))
-            if isinstance(overview, dict):
-                out.append(
-                    NodeStatus(
-                        node_id=node_id,
-                        reachable=True,
-                        hostname=text(overview.get("hostname") or entry.get("hostname")),
-                        version=text(overview.get("version")),
-                        is_leader=leader if isinstance(leader, bool) else None,
-                        is_processing=overview.get("is_processing"),
-                        lifecycle=text(overview.get("lifecycle")),
-                        lb_status=text(overview.get("lb_status")),
-                        started_at=text(overview.get("started_at")),
-                        last_seen=text(entry.get("last_seen")),
-                        transport_address=text(entry.get("transport_address")),
-                    )
+            out.append(
+                NodeStatus(
+                    node_id=node_id,
+                    reachable=reachable,
+                    hostname=text(overview.get("hostname") or entry.get("hostname")),
+                    version=text(overview.get("version")),
+                    is_leader=leader if isinstance(leader, bool) else None,
+                    is_processing=overview.get("is_processing"),
+                    lifecycle=text(overview.get("lifecycle")),
+                    lb_status=text(overview.get("lb_status")),
+                    started_at=text(overview.get("started_at")),
+                    last_seen=text(entry.get("last_seen")),
+                    transport_address=text(entry.get("transport_address")),
                 )
-            else:
-                out.append(
-                    NodeStatus(
-                        node_id=node_id,
-                        reachable=False,
-                        hostname=text(entry.get("hostname")),
-                        is_leader=leader if isinstance(leader, bool) else None,
-                        last_seen=text(entry.get("last_seen")),
-                        transport_address=text(entry.get("transport_address")),
-                    )
-                )
+            )
         return out

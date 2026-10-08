@@ -110,6 +110,26 @@ def integer(value: Any) -> int | None:
     return None
 
 
+def total_count(body: Mapping[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        value = integer(body.get(key))
+        if value is not None:
+            return value
+    pagination = body.get("pagination")
+    if isinstance(pagination, dict):
+        return integer(pagination.get("total"))
+    return None
+
+
+def page_number(offset: int, limit: int) -> int:
+    """1-based page for endpoints that page by number instead of offset.
+
+    Their next page always starts a whole page later (`offset + limit`), even
+    when an adapter dropped malformed entries from this one.
+    """
+    return offset // limit + 1
+
+
 def number(value: Any) -> float | None:
     if isinstance(value, bool) or value is None:
         return None

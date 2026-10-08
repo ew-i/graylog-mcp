@@ -25,10 +25,13 @@ class EventQuery:
     text: str = ""
     alerts_only: bool = True
     definition_ids: tuple[str, ...] = ()
+    offset: int = 0
 
     def __post_init__(self) -> None:
         if self.limit < 1:
             raise InvalidRequestError("limit must be positive")
+        if self.offset < 0:
+            raise InvalidRequestError("offset must not be negative")
 
 
 @dataclass(frozen=True)
@@ -47,8 +50,11 @@ class Event:
 
 @dataclass(frozen=True)
 class EventPage:
+    """One page of events; `next_offset` as for `SearchPage`."""
+
     total: int
     events: tuple[Event, ...]
+    next_offset: int
 
 
 @dataclass(frozen=True)

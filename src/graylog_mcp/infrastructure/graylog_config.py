@@ -18,7 +18,17 @@ from ..domain.configuration import (
     StreamConfig,
     StreamRule,
 )
-from .graylog_api import GraylogApi, integer, objects, segment, short_class, text
+from ..domain.models import ListingPage, ListingQuery
+from .graylog_api import (
+    GraylogApi,
+    integer,
+    objects,
+    page_number,
+    segment,
+    short_class,
+    text,
+    total_count,
+)
 
 
 def _strategy(class_name: Any, config: Any) -> Strategy:
@@ -127,12 +137,15 @@ class GraylogConfigStore:
             if s.get("id")
         ]
 
-    def lookup_tables(self, text_query: str, limit: int) -> list[LookupTable]:
-        params: dict[str, Any] = {"page": 1, "per_page": limit}
-        if text_query:
-            params["query"] = text_query
+    def lookup_tables(self, query: ListingQuery) -> ListingPage:
+        params: dict[str, Any] = {
+            "page": page_number(query.offset, query.limit),
+            "per_page": query.limit,
+        }
+        if query.text:
+            params["query"] = query.text
         body = self._api.get_object("/api/system/lookup/tables", params=params)
-        return [
+        tables = tuple(
             LookupTable(
                 id=text(t.get("id")),
                 name=str(t.get("name")),
@@ -141,7 +154,13 @@ class GraylogConfigStore:
             )
             for t in objects(body.get("lookup_tables"))
             if t.get("name")
-        ]
+        )
+        total = total_count(body, "total", "total_results", "count")
+        return ListingPage(
+            total=total if total is not None else len(tables),
+            items=tables,
+            next_offset=query.offset + query.limit,
+        )
 
     def lookup(self, table: str, key: str) -> LookupResult:
         body = self._api.get_object(

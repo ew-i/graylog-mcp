@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 from ..domain.errors import InvalidRequestError
 
@@ -21,6 +23,15 @@ class Limits:
     max_context_window_seconds: int = 24 * 3600
     max_events: int = 200
     max_listing: int = 200
+    # OpenSearch's default index.max_result_window: offset + size may not exceed it.
+    max_result_window: int = 10_000
+
+
+Clock = Callable[[], datetime]
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
 
 
 def clamp(value: int, low: int, high: int) -> int:

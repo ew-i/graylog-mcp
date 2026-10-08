@@ -158,10 +158,10 @@ def register(server: MCPServer, service: AnalyticsService) -> None:
     ) -> str:
         """The messages logged just before and after one message, like `grep -C`.
         Neighbours share the anchor's value of `context_field` (e.g. the same source
-        or pod); leave it empty to use the whole stream.
+        or pod; every item of a list value); leave it empty to use the whole stream.
 
         Args:
-            index: Index of the anchor message (from search results).
+            index: The anchor message's _index (from search results).
             message_id: The anchor message's _id.
             stream_id: Required. Access is enforced per stream; get IDs from browse_streams.
             before: Messages to show before the anchor (0-50).

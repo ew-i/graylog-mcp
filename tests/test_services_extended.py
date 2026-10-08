@@ -1,4 +1,5 @@
 import unittest
+from datetime import datetime, timezone
 
 from graylog_mcp.application.alerts import AlertService
 from graylog_mcp.application.configuration import ConfigurationService
@@ -19,7 +20,7 @@ from graylog_mcp.domain.configuration import (
     StreamRule,
 )
 from graylog_mcp.domain.errors import InvalidRequestError, NotFoundError
-from graylog_mcp.domain.models import Between, LastSeconds
+from graylog_mcp.domain.models import Between, LastSeconds, ListingPage, ListingQuery
 from graylog_mcp.domain.operations import (
     InputNodeState,
     InputStatus,
@@ -31,11 +32,13 @@ from graylog_mcp.domain.views import SavedQuery, ViewSummary
 
 from .fakes import FakeAlertStore, FakeConfigStore, FakeLogStore, FakeSystemStore, FakeViewStore
 
+NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
+
 
 class AlertServiceTest(unittest.TestCase):
     def setUp(self):
         self.store = FakeAlertStore()
-        self.service = AlertService(self.store)
+        self.service = AlertService(self.store, clock=lambda: NOW)
 
     def test_recent_alerts_query_and_shape(self):
         self.store.page = EventPage(
@@ -54,6 +57,7 @@ class AlertServiceTest(unittest.TestCase):
                     {"n": 1},
                 ),
             ),
+            1,
         )
         result = self.service.recent_alerts(
             seconds=3600, limit=5000, alerts_only=False, definition_id=" d1 "
@@ -61,13 +65,42 @@ class AlertServiceTest(unittest.TestCase):
         q = self.store.queries[-1]
         self.assertEqual(
             (q.window, q.limit, q.alerts_only, q.definition_ids),
-            (LastSeconds(3600), 200, False, ("d1",)),
+            (
+                Between("2026-10-07T11:00:00.000Z", "2026-10-07T12:00:00.000Z"),
+                200,
+                False,
+                ("d1",),
+            ),
         )
+        self.assertEqual(result["window"]["relative_seconds"], 3600)
         event = result["events"][0]
         self.assertEqual(
             (event["title"], event["priority"], event["key"]), ("High error rate", "high", None)
         )
         self.assertEqual(result["total"], 7)
+
+    def test_event_cursor_keeps_window_and_filters(self):
+        event = Event("e1", "d1", "t", "t", "m", 1, True, None, None)
+        self.store.page = EventPage(3, (event,), 1)
+        first = self.service.recent_alerts(
+            seconds=600, limit=1, alerts_only=False, definition_id="d1"
+        )
+        self.service.recent_alerts(seconds=60, limit=50, next_cursor=first["next_cursor"])
+        a, b = self.store.queries
+        self.assertEqual((b.window, b.alerts_only, b.definition_ids), (a.window, False, ("d1",)))
+        self.assertEqual((b.limit, b.offset), (1, 1))
+
+        with self.assertRaisesRegex(InvalidRequestError, "definition_id"):
+            self.service.recent_alerts(
+                seconds=600, limit=1, definition_id="d2", next_cursor=first["next_cursor"]
+            )
+
+    def test_event_cursor_continues_at_the_stores_next_offset(self):
+        event = Event("e1", "d1", "t", "t", "m", 1, True, None, None)
+        self.store.page = EventPage(5, (event,), 2)  # store dropped one of two entries
+        first = self.service.recent_alerts(seconds=600, limit=2)
+        self.service.recent_alerts(seconds=600, limit=2, next_cursor=first["next_cursor"])
+        self.assertEqual(self.store.queries[-1].offset, 2)
 
     def test_definitions_convert_milliseconds(self):
         self.store.definition_list = [
@@ -82,17 +115,68 @@ class AlertServiceTest(unittest.TestCase):
         )
         self.assertEqual(self.store.definition_requests[-1], ("err", 50))
 
+    def test_definition_cursor_paginates(self):
+        self.store.definition_list = [
+            EventDefinition("d1", "one", None, 1, True, None, None, (), None, None),
+            EventDefinition("d2", "two", None, 1, True, None, None, (), None, None),
+        ]
+        first = self.service.alert_definitions(limit=1)
+        second = self.service.alert_definitions(limit=1, next_cursor=first["next_cursor"])
+        self.assertEqual(
+            [item["id"] for item in first["definitions"] + second["definitions"]], ["d1", "d2"]
+        )
+        self.assertFalse(second["has_more"])
+
 
 class SavedViewServiceTest(unittest.TestCase):
     def setUp(self):
         self.logs = FakeLogStore(entries=[{"msg": "hit"}])
         self.views = FakeViewStore()
-        self.service = SavedViewService(self.views, LogService(self.logs))
+        self.service = SavedViewService(self.views, LogService(self.logs, clock=lambda: NOW))
 
     def test_listings(self):
         self.views.searches = [ViewSummary("v1", "Errors", None, None, "admin", "t")]
         self.assertEqual(self.service.saved_searches()["saved_searches"][0]["id"], "v1")
         self.assertEqual(self.service.dashboards()["total"], 0)
+
+    def test_saved_search_cursor_paginates(self):
+        self.views.searches = [
+            ViewSummary("v1", "One", None, None, None, None),
+            ViewSummary("v2", "Two", None, None, None, None),
+        ]
+        first = self.service.saved_searches(limit=1)
+        second = self.service.saved_searches(limit=1, next_cursor=first["next_cursor"])
+        self.assertEqual(
+            [item["id"] for item in first["saved_searches"] + second["saved_searches"]],
+            ["v1", "v2"],
+        )
+        self.assertEqual(second["next_cursor"], None)
+
+    def test_listing_cursor_continues_at_the_stores_next_offset(self):
+        # The store dropped a malformed entry from the first page of two.
+        pages = {
+            0: ListingPage(4, (ViewSummary("v1", "One", None, None, None, None),), 2),
+            2: ListingPage(
+                4,
+                (
+                    ViewSummary("v3", "Three", None, None, None, None),
+                    ViewSummary("v4", "Four", None, None, None, None),
+                ),
+                4,
+            ),
+        }
+        requested = []
+
+        def saved_searches(query):
+            requested.append(query)
+            return pages[query.offset]
+
+        self.views.saved_searches = saved_searches
+        first = self.service.saved_searches(text="x", limit=2)
+        second = self.service.saved_searches(limit=2, next_cursor=first["next_cursor"])
+        self.assertEqual(requested, [ListingQuery(2, "x", 0), ListingQuery(2, "x", 2)])
+        self.assertEqual([i["id"] for i in second["saved_searches"]], ["v3", "v4"])
+        self.assertFalse(second["has_more"])
 
     def test_run_uses_saved_query_stream_and_window(self):
         self.views.saved["v1"] = SavedQuery(
@@ -100,7 +184,10 @@ class SavedViewServiceTest(unittest.TestCase):
         )
         result = self.service.run_saved_search(view_id="v1")
         q = self.logs.last_query
-        self.assertEqual((q.text, q.stream_id, q.window), ("level:3", "s1", LastSeconds(600)))
+        self.assertEqual(
+            (q.text, q.stream_id, q.window),
+            ("level:3", "s1", Between("2026-10-07T11:50:00.000Z", "2026-10-07T12:00:00.000Z")),
+        )
         self.assertEqual(result["stream_id"], "s1")
         self.assertIn("2 streams", result["notes"][0])
         self.assertEqual(result["result"]["messages"], [{"msg": "hit"}])
@@ -111,12 +198,25 @@ class SavedViewServiceTest(unittest.TestCase):
         q = self.logs.last_query
         self.assertEqual((q.text, q.stream_id, q.window), ("*", "s9", Between("a", "b")))
 
+    def test_resumed_run_keeps_the_chosen_stream(self):
+        self.views.saved["v1"] = SavedQuery("v1", "Errors", "level:3", ("s1", "s2"), None)
+        self.logs.entries = [{"msg": "a"}, {"msg": "b"}]
+        first = self.service.run_saved_search(view_id="v1", stream_id="s2", limit=1)
+        second = self.service.run_saved_search(
+            view_id="v1", limit=1, next_cursor=first["result"]["next_cursor"]
+        )
+        self.assertEqual((second["stream_id"], self.logs.last_query.stream_id), ("s2", "s2"))
+        self.assertEqual(second["result"]["messages"], [{"msg": "b"}])
+
     def test_keyword_range_falls_back(self):
         self.views.saved["v3"] = SavedQuery(
             "v3", "K", "*", ("s1",), None, keyword="last five minutes"
         )
         result = self.service.run_saved_search(view_id="v3")
-        self.assertEqual(self.logs.last_query.window, LastSeconds(900))
+        self.assertEqual(
+            self.logs.last_query.window,
+            Between("2026-10-07T11:45:00.000Z", "2026-10-07T12:00:00.000Z"),
+        )
         self.assertIn("last five minutes", result["notes"][0])
 
     def test_stream_needed_when_saved_search_has_none(self):

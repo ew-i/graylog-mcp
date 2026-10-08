@@ -7,7 +7,17 @@ from typing import Any
 import httpx
 
 from ..domain.alerts import Event, EventDefinition, EventPage, EventQuery
-from .graylog_api import GraylogApi, first_list, integer, objects, text, timerange_json
+from ..domain.models import ListingPage, ListingQuery
+from .graylog_api import (
+    GraylogApi,
+    first_list,
+    integer,
+    objects,
+    page_number,
+    text,
+    timerange_json,
+    total_count,
+)
 
 
 class GraylogAlertStore:
@@ -22,7 +32,7 @@ class GraylogAlertStore:
             "/api/events/search",
             {
                 "query": query.text,
-                "page": 1,
+                "page": page_number(query.offset, query.limit),
                 "per_page": query.limit,
                 "filter": filter_body,
                 "timerange": timerange_json(query.window),
@@ -31,9 +41,10 @@ class GraylogAlertStore:
             },
         )
         context = body.get("context") if isinstance(body.get("context"), dict) else {}
+        definitions = context.get("event_definitions")
         titles = {
             def_id: (entry or {}).get("title")
-            for def_id, entry in (context.get("event_definitions") or {}).items()
+            for def_id, entry in (definitions if isinstance(definitions, dict) else {}).items()
             if isinstance(entry, dict) or entry is None
         }
         events = []
@@ -55,12 +66,20 @@ class GraylogAlertStore:
                 )
             )
         total = integer(body.get("total_events"))
-        return EventPage(total=total if total is not None else len(events), events=tuple(events))
+        return EventPage(
+            total=total if total is not None else len(events),
+            events=tuple(events),
+            next_offset=query.offset + query.limit,
+        )
 
-    def definitions(self, text_query: str, limit: int) -> list[EventDefinition]:
+    def definitions(self, query: ListingQuery) -> ListingPage:
         body = self._api.get_object(
             "/api/events/definitions",
-            params={"page": 1, "per_page": limit, "query": text_query},
+            params={
+                "page": page_number(query.offset, query.limit),
+                "per_page": query.limit,
+                "query": query.text,
+            },
         )
         out = []
         for item in first_list(body, ("event_definitions", "elements")):
@@ -80,4 +99,9 @@ class GraylogAlertStore:
                     execute_every_ms=integer(config.get("execute_every_ms")),
                 )
             )
-        return out
+        total = total_count(body, "total", "total_results", "count")
+        return ListingPage(
+            total=total if total is not None else len(out),
+            items=tuple(out),
+            next_offset=query.offset + query.limit,
+        )

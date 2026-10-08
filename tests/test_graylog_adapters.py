@@ -13,7 +13,7 @@ from graylog_mcp.domain.errors import (
     NotFoundError,
     UnsupportedError,
 )
-from graylog_mcp.domain.models import Between, LastSeconds
+from graylog_mcp.domain.models import Between, LastSeconds, ListingQuery
 from graylog_mcp.infrastructure.graylog_alerts import GraylogAlertStore
 from graylog_mcp.infrastructure.graylog_analytics import GraylogAnalyticsStore
 from graylog_mcp.infrastructure.graylog_config import GraylogConfigStore
@@ -189,7 +189,7 @@ class AlertAdapterTest(unittest.TestCase):
                 "sort_direction": "desc",
             },
         )
-        self.assertEqual(page.total, 12)
+        self.assertEqual((page.total, page.next_offset), (12, 20))
         first, second = page.events
         self.assertEqual(
             (first.definition_title, first.priority, first.fields), ("Errors spiking", 3, {"n": 2})
@@ -200,6 +200,19 @@ class AlertAdapterTest(unittest.TestCase):
         store, router = make(GraylogAlertStore, {("POST", "/api/events/search"): {"events": []}})
         store.events(EventQuery(window=LastSeconds(60), limit=1, alerts_only=False))
         self.assertEqual(router.body()["filter"], {"alerts": "include"})
+
+    def test_events_tolerate_malformed_definition_context(self):
+        store, _ = make(
+            GraylogAlertStore,
+            {
+                ("POST", "/api/events/search"): {
+                    "events": [{"id": "e1", "event_definition_id": "d1"}],
+                    "context": {"event_definitions": [{"id": "d1", "title": "Errors"}]},
+                }
+            },
+        )
+        page = store.events(EventQuery(window=LastSeconds(60), limit=1))
+        self.assertEqual(page.events[0].definition_title, None)
 
     def test_definitions_accept_either_list_key(self):
         definition = {
@@ -220,13 +233,15 @@ class AlertAdapterTest(unittest.TestCase):
                 store, router = make(
                     GraylogAlertStore, {("GET", "/api/events/definitions"): {key: [definition]}}
                 )
-                [d] = store.definitions("err", 10)
+                page = store.definitions(ListingQuery(10, "err", offset=10))
+                [d] = page.items
+                self.assertEqual(page.next_offset, 20)
                 self.assertEqual(
                     (d.kind, d.stream_ids, d.search_within_ms), ("aggregation-v1", ("s1",), 300000)
                 )
                 self.assertEqual(
                     dict(router.requests[-1].url.params),
-                    {"page": "1", "per_page": "10", "query": "err"},
+                    {"page": "2", "per_page": "10", "query": "err"},
                 )
 
 
@@ -243,10 +258,10 @@ class ViewAdapterTest(unittest.TestCase):
                 ("GET", "/api/dashboards"): {"views": [{"id": "d1", "title": "Ops"}]},
             },
         )
-        [saved] = store.saved_searches("err", 5)
+        [saved] = store.saved_searches(ListingQuery(5, "err")).items
         self.assertEqual((saved.id, saved.owner, saved.last_updated), ("v1", "admin", "t"))
         self.assertEqual(router.requests[-1].url.params["query"], "err")
-        self.assertEqual(store.dashboards("", 5)[0].title, "Ops")
+        self.assertEqual(store.dashboards(ListingQuery(5)).items[0].title, "Ops")
         self.assertNotIn("query", router.requests[-1].url.params)
 
     def test_saved_query_parsing(self):
@@ -587,10 +602,25 @@ class ConfigAdapterTest(unittest.TestCase):
                 },
             },
         )
-        self.assertEqual(store.lookup_tables("hosts", 10)[0].name, "hosts")
+        self.assertEqual(store.lookup_tables(ListingQuery(10, "hosts")).items[0].name, "hosts")
         result = store.lookup("hosts", "10.0.0.1")
         self.assertEqual((result.single_value, result.ttl), ("db-1", 60))
         self.assertEqual(router.requests[-1].url.params["key"], "10.0.0.1")
+
+    def test_page_numbered_listing_advances_a_whole_page_past_dropped_entries(self):
+        store, router = make(
+            GraylogConfigStore,
+            {
+                ("GET", "/api/system/lookup/tables"): {
+                    "lookup_tables": [{"id": "t5", "name": "hosts"}, {"id": "t6"}],
+                    "total": 8,
+                }
+            },
+        )
+        page = store.lookup_tables(ListingQuery(2, offset=4))
+        self.assertEqual(router.requests[-1].url.params["page"], "3")
+        self.assertEqual([t.name for t in page.items], ["hosts"])  # nameless table dropped
+        self.assertEqual(page.next_offset, 6)
 
     def test_lookup_query_is_omitted_and_stage_match_can_be_missing(self):
         store, router = make(
@@ -602,7 +632,7 @@ class ConfigAdapterTest(unittest.TestCase):
                 ],
             },
         )
-        self.assertEqual(store.lookup_tables("", 5), [])
+        self.assertEqual(store.lookup_tables(ListingQuery(5)).items, ())
         self.assertNotIn("query", router.requests[-1].url.params)
         self.assertIsNone(store.pipelines()[0].stages[0].match)
 

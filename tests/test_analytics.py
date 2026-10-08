@@ -109,7 +109,7 @@ class CompareWindowsTest(AnalyticsTestCase):
 
     def test_windows_totals_and_changes(self):
         totals = {"2026-09-25T11:00:00.000Z": 150, "2026-09-24T11:00:00.000Z": 100}
-        self.logs.responder = lambda q: SearchPage(totals[q.window.start], ())
+        self.logs.responder = lambda q: SearchPage(totals[q.window.start], (), 0)
         self.agg.tables = [
             table((["timeout"], {"count": 90}), (["refused"], {"count": 10})),  # current
             table((["timeout"], {"count": 40}), (["disk full"], {"count": 60})),  # baseline
@@ -215,7 +215,8 @@ class MessageContextTest(AnalyticsTestCase):
                 ids = ["m0", "b1", "b1", "b2", "b3"]
             else:  # later messages, oldest first
                 ids = ["m0", "a1", "b1", "a2"]
-            return SearchPage(len(ids), tuple(LogEntry({"_id": i, "msg": i}) for i in ids))
+            entries = tuple(LogEntry({"_id": i, "msg": i}) for i in ids)
+            return SearchPage(len(ids), entries, len(ids))
 
         self.logs.responder = respond
 
@@ -245,6 +246,35 @@ class MessageContextTest(AnalyticsTestCase):
         self.assertIn("'pod'", result["note"])
         self.assertEqual(len(self.logs.queries), 1)  # after=0 skips the second search
 
+    def test_list_value_requires_every_item(self):
+        self.logs.stored[("idx", "m0")]["tags"] = ["web", 'a"b']
+        result = self.service.message_context(
+            index="idx", message_id="m0", stream_id="s1", context_field="tags"
+        )
+        self.assertEqual(self.logs.queries[0].text, 'tags:"web" AND tags:"a\\"b"')
+        self.assertEqual(result["context_value"], ["web", 'a"b'])
+        self.assertIsNone(result["note"])
+
+    def test_boolean_value_uses_lowercase_literal(self):
+        self.logs.stored[("idx", "m0")]["retry"] = True
+        self.service.message_context(
+            index="idx", message_id="m0", stream_id="s1", context_field="retry"
+        )
+        self.assertEqual(self.logs.queries[0].text, 'retry:"true"')
+
+    def test_unmatchable_value_falls_back_to_stream_with_reason(self):
+        for value, kind in (([], "list"), ({"k": "v"}, "dict"), (["a", None], "list")):
+            with self.subTest(value=value):
+                self.logs.stored[("idx", "m0")]["meta"] = value
+                self.logs.queries.clear()
+                result = self.service.message_context(
+                    index="idx", message_id="m0", stream_id="s1", context_field="meta"
+                )
+                self.assertEqual(self.logs.queries[0].text, "*")
+                self.assertIsNone(result["context_field"])
+                self.assertIsNone(result["context_value"])
+                self.assertIn(f"'meta' value ({kind}) cannot be matched", result["note"])
+
     def test_validation(self):
         with self.assertRaises(InvalidRequestError):
             self.service.message_context(index="", message_id="m0", stream_id="s1")
@@ -258,6 +288,11 @@ class MessageContextTest(AnalyticsTestCase):
     def test_message_without_timestamp(self):
         self.logs.stored[("idx", "m9")] = {"_id": "m9"}
         with self.assertRaises(BackendError):
+            self.service.message_context(index="idx", message_id="m9", stream_id="s1")
+
+    def test_unparseable_stored_timestamp_is_a_backend_error(self):
+        self.logs.stored[("idx", "m9")] = {"_id": "m9", "timestamp": "yesterday"}
+        with self.assertRaisesRegex(BackendError, "'yesterday' is not a recognised date"):
             self.service.message_context(index="idx", message_id="m9", stream_id="s1")
 
 

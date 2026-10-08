@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 
-from ..domain.errors import GraylogMcpError
+from ..domain.errors import GraylogMcpError, error_payload
 from ..domain.models import JsonDict
 from .alerts import AlertService
 from .analytics import AnalyticsService
@@ -13,6 +14,8 @@ from .operations import OperationsService
 from .service import LogService
 
 _TOP_FIELDS = ("source", "service", "level", "http_response_code")
+
+_log = logging.getLogger(__name__)
 
 
 class IncidentService:
@@ -32,10 +35,13 @@ class IncidentService:
 
     @staticmethod
     def _capture(action: Callable[[], JsonDict]) -> JsonDict:
+        """Run one report section; a failure replaces that section, not the whole report."""
         try:
             return action()
-        except GraylogMcpError as exc:
-            return {"error": str(exc), "kind": exc.kind}
+        except Exception as exc:
+            if not isinstance(exc, GraylogMcpError):
+                _log.exception("incident section failed unexpectedly")
+            return error_payload(exc)
 
     def investigate(
         self,
@@ -58,17 +64,22 @@ class IncidentService:
                 stream_id=stream_id,
                 seconds=range_seconds,
                 limit=message_limit,
-                include_references=True,
             )
         )
-        references = representative.pop("references", [])
+        reference = next(
+            (
+                message
+                for message in representative.get("messages", [])
+                if message.get("_index") and message.get("_id")
+            ),
+            None,
+        )
         context = None
-        if references:
-            reference = references[0]
+        if reference is not None:
             context = self._capture(
                 lambda: self._analytics.message_context(
-                    index=reference["index"],
-                    message_id=reference["message_id"],
+                    index=reference["_index"],
+                    message_id=reference["_id"],
                     stream_id=stream_id,
                     before=context_before,
                     after=context_after,

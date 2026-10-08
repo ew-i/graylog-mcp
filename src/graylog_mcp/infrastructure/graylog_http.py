@@ -26,9 +26,16 @@ _SEARCH_PATHS = {
 
 
 def _unwrap(hit: dict[str, Any]) -> dict[str, Any]:
-    """Search hits nest fields under 'message'; single-message lookups too."""
+    """Search hits nest fields under 'message'."""
     inner = hit.get("message")
     return inner if isinstance(inner, dict) else hit
+
+
+def _unwrap_single(body: dict[str, Any]) -> dict[str, Any]:
+    """Single-message lookups nest fields one level deeper, under 'message.fields'."""
+    inner = _unwrap(body)
+    fields = inner.get("fields")
+    return fields if isinstance(fields, dict) else inner
 
 
 def _index(hit: dict[str, Any]) -> str | None:
@@ -70,14 +77,21 @@ class GraylogStore:
         body = self._api.get_object(
             _SEARCH_PATHS[type(query.window)], params=self._search_params(query)
         )
-        entries = tuple(
-            LogEntry(_unwrap(hit), index=_index(hit)) for hit in objects(body.get("messages"))
+        hits = body.get("messages")
+        entries = tuple(LogEntry(_unwrap(hit), index=_index(hit)) for hit in objects(hits))
+        # The search API pages by offset: continue after every hit it sent, kept or not.
+        sent = len(hits) if isinstance(hits, list) else 0
+        return SearchPage(
+            total_hits=integer(body.get("total_results")) or 0,
+            entries=entries,
+            next_offset=query.offset + sent,
         )
-        return SearchPage(total_hits=integer(body.get("total_results")) or 0, entries=entries)
 
     def fetch(self, index: str, message_id: str) -> LogEntry:
         return LogEntry(
-            _unwrap(self._api.get_object(f"/api/messages/{segment(index)}/{segment(message_id)}")),
+            _unwrap_single(
+                self._api.get_object(f"/api/messages/{segment(index)}/{segment(message_id)}")
+            ),
             index=index,
         )
 
@@ -89,6 +103,8 @@ class GraylogStore:
             "sort": query.sort.as_param(),
             "filter": f"streams:{query.stream_id}",
         }
+        if query.offset:
+            params["offset"] = query.offset
         window = query.window
         if isinstance(window, LastSeconds):
             params["range"] = window.seconds

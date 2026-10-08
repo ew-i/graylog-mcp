@@ -42,14 +42,18 @@ def register(server: MCPServer, service: ConfigurationService) -> None:
         return respond(lambda: service.index_sets(stream_id=stream_id))
 
     @server.tool()
-    def lookup_tables(query: str = "", limit: int = 50) -> str:
+    def lookup_tables(query: str = "", limit: int = 50, next_cursor: str = "") -> str:
         """List lookup tables (e.g. IP to hostname, user ID to name) that lookup_value can use.
 
         Args:
             query: Optional text to filter by name.
             limit: Maximum tables returned (1-200).
+            next_cursor: A previous response's next_cursor. Continues that exact request:
+                filters, time range and page size come from the cursor.
         """
-        return respond(lambda: service.lookup_tables(text=query, limit=limit))
+        return respond(
+            lambda: service.lookup_tables(text=query, limit=limit, next_cursor=next_cursor)
+        )
 
     @server.tool()
     def lookup_value(table: str, key: str) -> str:

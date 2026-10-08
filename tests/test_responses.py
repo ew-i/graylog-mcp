@@ -3,7 +3,29 @@ import os
 import unittest
 from unittest.mock import patch
 
+from graylog_mcp.domain.errors import NotFoundError
 from graylog_mcp.interface.responses import respond
+
+
+def fail(exc):
+    def action():
+        raise exc
+
+    return action
+
+
+class ResponseErrorTest(unittest.TestCase):
+    def test_expected_error_keeps_its_kind_without_logging(self):
+        with self.assertNoLogs("graylog_mcp.interface.responses"):
+            result = json.loads(respond(fail(NotFoundError("no such stream"))))
+        self.assertEqual(result, {"error": "no such stream", "kind": "NotFound"})
+
+    def test_unexpected_error_becomes_internal_payload_and_is_logged(self):
+        with self.assertLogs("graylog_mcp.interface.responses", level="ERROR"):
+            result = json.loads(respond(fail(KeyError("password=hunter2"))))
+        self.assertEqual(result["kind"], "Internal")
+        self.assertTrue(result["error"].startswith("Unexpected KeyError: "))
+        self.assertNotIn("hunter2", result["error"])
 
 
 class ResponseRedactionTest(unittest.TestCase):

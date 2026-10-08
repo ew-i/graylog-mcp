@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Any
 
 from ..domain.aggregation import (
@@ -18,19 +17,37 @@ from ..domain.aggregation import (
 from ..domain.errors import BackendError, InvalidRequestError
 from ..domain.models import Between, JsonDict, LastSeconds, LogEntry, LogQuery, Sort, SortDirection
 from ..domain.timeutil import format_timestamp, parse_timestamp
-from .policy import Limits, clamp, parse_field_list, parse_percentiles
+from .policy import Clock, Limits, clamp, parse_field_list, parse_percentiles
+from .policy import utc_now as _utc_now
 from .ports import AggregationStore, LogStore
-
-Clock = Callable[[], datetime]
-
-
-def _utc_now() -> datetime:
-    return datetime.now(timezone.utc)
 
 
 def _lucene_phrase(value: Any) -> str:
+    if isinstance(value, bool):
+        value = "true" if value else "false"  # str(True) is "True"; the index stores true
     text = str(value).replace("\\", "\\\\").replace('"', '\\"')
     return f'"{text}"'
+
+
+def _scope_query(field: str, value: Any) -> str | None:
+    """A clause matching messages that share `value` in `field`, or None if it has none.
+
+    A list value requires every one of its items, so neighbours carry the
+    same values as the anchor (and possibly more).
+    """
+    items = value if isinstance(value, (list, tuple)) else [value]
+    if not items or not all(isinstance(item, (str, int, float)) for item in items):
+        return None
+    return " AND ".join(f"{field}:{_lucene_phrase(item)}" for item in items)
+
+
+def _scope_note(field: str, value: Any) -> str:
+    if value is None:
+        return f"The message has no {field!r} field, so neighbours come from the whole stream."
+    return (
+        f"The message's {field!r} value ({type(value).__name__}) cannot be matched in a "
+        "search, so neighbours come from the whole stream."
+    )
 
 
 class AnalyticsService:
@@ -302,15 +319,24 @@ class AnalyticsService:
         raw_ts = anchor.fields.get("timestamp")
         if raw_ts is None:
             raise BackendError("the message has no timestamp, so its neighbours cannot be located")
-        moment = parse_timestamp(str(raw_ts))
+        try:
+            moment = parse_timestamp(str(raw_ts))
+        except InvalidRequestError:  # the stored value is Graylog's, not the caller's
+            raise BackendError(
+                f"the message's timestamp {raw_ts!r} is not a recognised date, "
+                "so its neighbours cannot be located"
+            ) from None
 
         scope_field: str | None = (
             require_field_name(context_field) if context_field.strip() else None
         )
         scope_value = anchor.fields.get(scope_field) if scope_field else None
-        query_text = (
-            f"{scope_field}:{_lucene_phrase(scope_value)}" if scope_value is not None else "*"
+        scope = (
+            _scope_query(scope_field, scope_value)
+            if scope_field and scope_value is not None
+            else None
         )
+        query_text = scope or "*"
 
         def neighbours(
             start: datetime, end: datetime, direction: SortDirection, count: int
@@ -350,14 +376,11 @@ class AnalyticsService:
         earlier.reverse()  # chronological
 
         return {
-            "anchor": anchor.visible(only),
+            "anchor": anchor.listed(only),
             "anchor_time": format_timestamp(moment),
-            "context_field": scope_field if scope_value is not None else None,
-            "context_value": scope_value,
-            "before": [e.visible(only) for e in earlier],
-            "after": [e.visible(only) for e in later],
-            "note": None
-            if scope_value is not None or not scope_field
-            else f"The message has no {scope_field!r} field, "
-            "so neighbours come from the whole stream.",
+            "context_field": scope_field if scope else None,
+            "context_value": scope_value if scope else None,
+            "before": [e.listed(only) for e in earlier],
+            "after": [e.listed(only) for e in later],
+            "note": None if scope or not scope_field else _scope_note(scope_field, scope_value),
         }

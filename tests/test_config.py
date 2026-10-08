@@ -95,6 +95,7 @@ class SettingsTest(unittest.TestCase):
             {"GRAYLOG_TIMEOUT_SECONDS": "0"},
             {"MCP_STREAMABLE_HTTP_PATH": "mcp"},
             {"MCP_PORT": "0"},
+            {"MCP_PORT": "65536"},
         ):
             with (
                 self.subTest(**override),

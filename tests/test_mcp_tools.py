@@ -198,7 +198,7 @@ class McpToolsTest(unittest.TestCase):
         )
         cases = {
             "cluster_status": (search, "cluster_info", {}),
-            "browse_streams": (search, "streams", {}),
+            "browse_streams": (search, "streams", {"limit": 50, "next_cursor": ""}),
             "find_recent_logs": (
                 search,
                 "search_recent",
@@ -210,6 +210,7 @@ class McpToolsTest(unittest.TestCase):
                     "fields": "source,message",
                     "sort_field": "source",
                     "sort_order": "asc",
+                    "next_cursor": "",
                 },
             ),
             "find_logs_between": (
@@ -224,6 +225,7 @@ class McpToolsTest(unittest.TestCase):
                     "fields": "source,message",
                     "sort_field": "source",
                     "sort_order": "asc",
+                    "next_cursor": "",
                 },
             ),
             "read_log_message": (
@@ -307,16 +309,35 @@ class McpToolsTest(unittest.TestCase):
                     "alerts_only": False,
                     "text": "error",
                     "definition_id": "def-1",
+                    "next_cursor": "",
                 },
             ),
-            "alert_definitions": (alerts, "alert_definitions", {"text": "error", "limit": 3}),
-            "saved_searches": (views, "saved_searches", {"text": "error", "limit": 3}),
+            "alert_definitions": (
+                alerts,
+                "alert_definitions",
+                {"text": "error", "limit": 3, "next_cursor": ""},
+            ),
+            "saved_searches": (
+                views,
+                "saved_searches",
+                {"text": "error", "limit": 3, "next_cursor": ""},
+            ),
             "run_saved_search": (
                 views,
                 "run_saved_search",
-                {"view_id": "view-1", "stream_id": "s1", "limit": 3, "fields": "message"},
+                {
+                    "view_id": "view-1",
+                    "stream_id": "s1",
+                    "limit": 3,
+                    "fields": "message",
+                    "next_cursor": "",
+                },
             ),
-            "dashboards": (views, "dashboards", {"text": "ops", "limit": 3}),
+            "dashboards": (
+                views,
+                "dashboards",
+                {"text": "ops", "limit": 3, "next_cursor": ""},
+            ),
             "input_status": (operations, "input_status", {"only_problems": True}),
             "throughput": (operations, "throughput", {}),
             "system_notifications": (operations, "notifications", {}),
@@ -328,7 +349,11 @@ class McpToolsTest(unittest.TestCase):
                 {"stream_id": "s1", "include_source": False},
             ),
             "index_sets": (configuration, "index_sets", {"stream_id": "s1"}),
-            "lookup_tables": (configuration, "lookup_tables", {"text": "hosts", "limit": 3}),
+            "lookup_tables": (
+                configuration,
+                "lookup_tables",
+                {"text": "hosts", "limit": 3, "next_cursor": ""},
+            ),
             "lookup_value": (
                 configuration,
                 "lookup_value",
