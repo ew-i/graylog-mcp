@@ -58,7 +58,7 @@ jobs:
         if: matrix.python-version == '3.14'
         run: |
           mkdir -p output
-          uv run coverage-badge -o output/coverage.svg
+          uv run genbadge coverage -i coverage.xml -o output/coverage.svg
 
       - name: Publish coverage badge
         if: matrix.python-version == '3.14' && github.event_name == 'push' && github.ref == 'refs/heads/main'
