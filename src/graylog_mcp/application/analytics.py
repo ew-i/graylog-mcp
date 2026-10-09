@@ -129,7 +129,9 @@ class AnalyticsService:
             if peak
             else None,
             "buckets": points,
-            "note": "Buckets with no messages are omitted." if points else None,
+            "note": "Time ranges without messages may have no bucket; a missing bucket means 0."
+            if points
+            else None,
         }
 
     # -- exact_field_counts --------------------------------------------------

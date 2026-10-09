@@ -29,6 +29,9 @@ QUERY_SYNTAX = """\
 - Escape these characters with a backslash when they are part of a value:
   `& | : \\ / + - ! ( ) { } [ ] ^ " ~ * ?`, e.g. `path:\\/api\\/v1`.
 - Leading wildcards (`*error`) are disabled on most Graylog servers.
+- Group and count by structured fields. The full-text `message` field cannot be
+  used by `exact_field_counts`, `compare_windows` or `field_stats` (Graylog
+  rejects it); `rank_field_values` can rank message texts from a sample.
 
 ## Using this server
 

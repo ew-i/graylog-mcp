@@ -1,4 +1,4 @@
-"""MCP adapter: exposes the application's use cases as tools and resources.
+"""MCP adapter: exposes the application's use cases as tools, resources and prompts.
 
 Each area registers its own tools; none of them raise. Failures become
 `{"error": ..., "kind": ...}` payloads the model can read and react to.
@@ -19,6 +19,7 @@ from ..application.operations import OperationsService
 from ..application.saved_views import SavedViewService
 from ..application.service import LogService
 from . import (
+    prompts,
     resources,
     tools_alerts,
     tools_analytics,
@@ -62,6 +63,7 @@ def build_server(
     tools_operations.register(server, services.operations)
     tools_configuration.register(server, services.configuration)
     resources.register(server, services, resources.TtlCache(resource_cache_seconds))
+    prompts.register(server)
     tools_incident.register(
         server,
         IncidentService(

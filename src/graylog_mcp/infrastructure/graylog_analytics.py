@@ -19,11 +19,14 @@ from ..domain.aggregation import (
     TimeGrouping,
     ValuesGrouping,
 )
-from ..domain.errors import BackendError, NotFoundError, UnsupportedError
+from ..domain.errors import BackendError, InvalidRequestError, NotFoundError, UnsupportedError
 from .graylog_api import GraylogApi, timerange_json
 
 AGGREGATE_PATH = "/api/search/aggregate"
 _STREAM_GROUP_LIMIT = 100
+# How Graylog rejects grouping by (script_exception) or measuring (the text) a
+# full-text field such as `message`.
+_TEXT_FIELD_ERRORS = ("script_exception", "Text fields are not optimised")
 
 
 def _grouping_json(group) -> dict[str, Any]:
@@ -72,6 +75,19 @@ class GraylogAnalyticsStore:
         except NotFoundError as exc:
             raise UnsupportedError(
                 "server-side aggregation needs the Search Scripting API (Graylog 5.1 or newer)"
+            ) from exc
+        except BackendError as exc:
+            if not any(marker in str(exc) for marker in _TEXT_FIELD_ERRORS):
+                raise
+            fields = dict.fromkeys(
+                [g.field for g in query.groups if isinstance(g, ValuesGrouping)]
+                + [m.field for m in query.metrics if m.field]
+            )
+            raise InvalidRequestError(
+                f"Graylog could not aggregate {', '.join(fields)}. This usually means a "
+                "full-text field such as message, which cannot be grouped, counted per value "
+                "or measured; use a structured field (see discover_fields), or "
+                "rank_field_values to rank message texts."
             ) from exc
 
         width = len(groups) + len(query.metrics)

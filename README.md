@@ -1,8 +1,8 @@
 # graylog-mcp
 
-Read-only Graylog access exposed as 28 MCP tools, 7 MCP resources and one
-resource template over stdio or Streamable HTTP: search, analysis, alerts, saved
-searches, cluster health and configuration.
+Read-only Graylog access exposed as 28 MCP tools, 7 MCP resources, one resource
+template and 8 workflow prompts over stdio or Streamable HTTP: search, analysis,
+alerts, saved searches, cluster health and configuration.
 
 [![build](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml) [![coverage](https://raw.githubusercontent.com/ew-i/badges/main/graylog-mcp/coverage.svg)](https://github.com/ew-i/graylog-mcp)
 
@@ -78,6 +78,26 @@ failures are not cached. Catalogue resources return the first 200 entries with
 the usual `has_more`/`next_cursor`; page further with the tool. Tools are never
 cached; use them when the data must be current, such as cluster health.
 
+## Prompts
+
+Prompts are workflow templates a user picks in the client (often as a slash
+command). Each renders step-by-step instructions naming the tools to call and
+what to report; prompts themselves never call Graylog.
+
+| Prompt                       | Arguments                                          | Workflow                                           |
+|------------------------------|----------------------------------------------------|----------------------------------------------------|
+| `triage-production-alert`    | `alert`, `range_seconds`                           | Real or noise, scope, likely cause of an alert     |
+| `investigate-service-errors` | `service` (required), `stream_id`, `range_seconds` | Error groups, onset and cause for a service        |
+| `compare-deployment-impact`  | `deployed_at` (required), `service`, `stream_id`   | Errors and volume before versus after a deploy     |
+| `find-missing-logs`          | `source` (required), `stream_id`                   | Never sent, lost, misrouted or expired             |
+| `build-query`                | `request` (required), `stream_id`                  | Plain language to a tested query (guide attached)  |
+| `explain-log-message`        | `index`, `message_id` (both required), `stream_id` | Meaning, surrounding messages, how often it occurs |
+| `daily-briefing`             | `stream_id`                                        | Last 24 h: alerts, volume, new and rising errors   |
+| `summarize-cluster-health`   |                                                    | OK, DEGRADED or DOWN with evidence                 |
+
+Without a `stream_id`, a prompt tells the model to pick one with `browse_streams`;
+`explain-log-message` reads it from the message instead.
+
 ## Layout
 
 ```
@@ -102,6 +122,7 @@ src/graylog_mcp/
     mcp_tools.py      ServiceBundle + build_server
     resources.py      graylog:// resources with a short-lived cache
     query_guide.py    text of the graylog://guide/query-syntax resource
+    prompts.py        workflow prompts
     tools_*.py  responses.py
   cli.py             argparse entrypoint and composition root
 tests/              domain, services (with fakes), adapters (MockTransport), MCP round trips

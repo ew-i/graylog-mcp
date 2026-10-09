@@ -125,6 +125,43 @@ class AnalyticsAdapterTest(unittest.TestCase):
             (result.rows[0].keys, result.rows[0].values), ((), {"count(t)": 9, "p90(t)": 12.5})
         )
 
+    def test_full_text_field_errors_become_invalid_requests(self):
+        replies = (
+            '{"message":"Search type returned error: script_exception - runtime error."}',
+            '{"message":"illegal_argument_exception - Text fields are not optimised for ..."}',
+        )
+        query = AggregationQuery(
+            "*",
+            "s1",
+            LastSeconds(60),
+            (ValuesGrouping("message", 5),),
+            (
+                Metric("count"),
+                Metric("avg", "duration_ms"),
+                Metric("max", "message"),
+                Metric("min", "duration_ms"),
+            ),
+        )
+        for reply in replies:
+            with self.subTest(reply=reply):
+                store, _ = make(
+                    GraylogAnalyticsStore,
+                    {("POST", "/api/search/aggregate"): httpx.Response(400, text=reply)},
+                )
+                with self.assertRaisesRegex(
+                    InvalidRequestError, "could not aggregate message, duration_ms\\. "
+                ):
+                    store.aggregate(query)
+
+    def test_other_aggregation_errors_stay_backend_errors(self):
+        store, _ = make(
+            GraylogAnalyticsStore,
+            {("POST", "/api/search/aggregate"): httpx.Response(400, text="query_parsing failed")},
+        )
+        with self.assertRaises(BackendError) as ctx:
+            store.aggregate(AggregationQuery("*", "s1", LastSeconds(60), (), (Metric("count"),)))
+        self.assertNotIsInstance(ctx.exception, InvalidRequestError)
+
     def test_missing_endpoint_means_unsupported_version(self):
         store, _ = make(GraylogAnalyticsStore, {})
         with self.assertRaises(UnsupportedError) as ctx:
