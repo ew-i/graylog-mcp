@@ -10,7 +10,7 @@ from dataclasses import asdict
 from typing import Any
 
 from ..domain.analysis import field_names, rank_values
-from ..domain.errors import InvalidRequestError
+from ..domain.errors import InvalidRequestError, NotFoundError
 from ..domain.models import (
     Between,
     JsonDict,
@@ -43,18 +43,12 @@ class LogService:
 
     def streams(self, *, limit: int = 50, next_cursor: str = "") -> JsonDict:
         page = open_page("streams", next_cursor, limit=limit, max_limit=self._limits.max_listing)
-        visible = [
-            {"id": s.id, "title": s.title, "description": s.description, "disabled": s.disabled}
-            for s in self._store.streams()
-            if not s.is_default
-        ]
-        items = visible[page.offset : page.offset + page.limit]
-        # ponytail: slice locally until Graylog's streams endpoint exposes pages.
+        found = self._store.streams(page.offset, page.limit)
         return {
-            "total": len(visible),
-            "returned": len(items),
-            "streams": items,
-            **page_metadata(page, len(items), len(visible), next_offset=page.offset + len(items)),
+            "total": found.total,
+            "returned": len(found.items),
+            "streams": [asdict(s) for s in found.items],
+            **page_metadata(page, len(found.items), found.total, next_offset=found.next_offset),
         }
 
     # -- search --------------------------------------------------------------
@@ -197,17 +191,22 @@ class LogService:
 
     def discover_fields(self, *, stream_id: str, seconds: int) -> JsonDict:
         window = LastSeconds(_clamp(seconds, 1, self._limits.max_window_seconds))
-        page = self._store.search(
-            LogQuery(
-                text="*",
-                stream_id=stream_id,
-                window=window,
-                max_results=self._limits.field_discovery_sample,
-            )
+        query = LogQuery(
+            text="*",
+            stream_id=stream_id.strip(),
+            window=window,
+            max_results=self._limits.field_discovery_sample,
         )
+        # An unknown stream would just match nothing; say so instead of listing no fields.
+        if not self._store.stream_exists(query.stream_id):
+            raise NotFoundError(
+                f"stream {query.stream_id!r} does not exist or this token cannot read it; "
+                "call browse_streams to find one"
+            )
+        page = self._store.search(query)
         names = field_names(page.entries)
         return {
-            "stream_id": stream_id,
+            "stream_id": query.stream_id,
             "window": window.describe(),
             "sampled_messages": len(page.entries),
             "count": len(names),

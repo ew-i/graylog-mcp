@@ -196,6 +196,20 @@ class CompositionRootTest(unittest.TestCase):
         self.assertEqual(server.transport, "stdio")
         self.assertEqual(server.options, {})
         self.assertEqual(build_server.call_args.kwargs["log_level"], "DEBUG")
+        self.assertEqual(build_server.call_args.kwargs["resource_cache_seconds"], 60.0)
+
+    def test_cli_sets_resource_cache_seconds(self):
+        with patch.dict(
+            os.environ,
+            {
+                "GRAYLOG_BASE_URL": "https://gl.example",
+                "GRAYLOG_API_TOKEN": "token",
+                "MCP_RESOURCE_CACHE_SECONDS": "120",
+            },
+            clear=True,
+        ):
+            settings = entry.parse_args(["--resource-cache-seconds", "0"])
+        self.assertEqual(settings.resource_cache_seconds, 0.0)
 
     def test_main_runs_streamable_http_server(self):
         server = FakeServer()

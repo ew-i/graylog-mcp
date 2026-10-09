@@ -87,7 +87,7 @@ def _text_of(result) -> str:
 class McpToolsTest(unittest.TestCase):
     def setUp(self):
         self.logs = FakeLogStore(
-            stream_list=[Stream("s1", "api", None, False, False)],
+            stream_list=[Stream("s1", "api", None, False)],
             entries=[{"msg": "boom", "pod": "a"}],
         )
         self.agg = FakeAggregationStore()

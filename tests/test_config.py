@@ -23,16 +23,23 @@ class SettingsTest(unittest.TestCase):
         self.assertEqual(s.host, "127.0.0.1")
         self.assertEqual(s.port, 8000)
         self.assertEqual(s.streamable_http_path, "/mcp")
+        self.assertEqual(s.resource_cache_seconds, 60.0)
 
     def test_overrides(self):
         with patch.dict(
             os.environ,
-            {**BASE, "GRAYLOG_VERIFY_TLS": "false", "GRAYLOG_TIMEOUT_SECONDS": "5"},
+            {
+                **BASE,
+                "GRAYLOG_VERIFY_TLS": "false",
+                "GRAYLOG_TIMEOUT_SECONDS": "5",
+                "MCP_RESOURCE_CACHE_SECONDS": "0",
+            },
             clear=True,
         ):
             s = Settings().validated()
         self.assertFalse(s.verify_tls)
         self.assertEqual(s.timeout_seconds, 5.0)
+        self.assertEqual(s.resource_cache_seconds, 0.0)
 
     def test_process_environment_overrides_env_file(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -96,6 +103,8 @@ class SettingsTest(unittest.TestCase):
             {"MCP_STREAMABLE_HTTP_PATH": "mcp"},
             {"MCP_PORT": "0"},
             {"MCP_PORT": "65536"},
+            {"MCP_RESOURCE_CACHE_SECONDS": "-1"},
+            {"MCP_RESOURCE_CACHE_SECONDS": "soon"},
         ):
             with (
                 self.subTest(**override),

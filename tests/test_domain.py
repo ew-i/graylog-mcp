@@ -114,8 +114,11 @@ class AnalysisTest(unittest.TestCase):
         ranked = rank_values(entries, "code", top=10)
         self.assertEqual([(v.value, v.count) for v in ranked], [("500", 2)])
 
-    def test_field_names_is_sorted_union(self):
-        entries = [LogEntry({"b": 1, "a": 1}), LogEntry({"c": 1, "a": 2})]
+    def test_field_names_is_sorted_union_without_internal_fields(self):
+        entries = [
+            LogEntry({"b": 1, "a": 1, "_id": "x", "gl2_source_node": "n"}),
+            LogEntry({"c": 1, "a": 2, "streams": ["s1"]}),
+        ]
         self.assertEqual(field_names(entries), ["a", "b", "c"])
 
 

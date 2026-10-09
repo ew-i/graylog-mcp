@@ -1,6 +1,6 @@
-"""MCP adapter: exposes the application's use cases as tools.
+"""MCP adapter: exposes the application's use cases as tools and resources.
 
-Each area registers its own tools; none of them raise. Expected failures become
+Each area registers its own tools; none of them raise. Failures become
 `{"error": ..., "kind": ...}` payloads the model can read and react to.
 """
 
@@ -19,6 +19,7 @@ from ..application.operations import OperationsService
 from ..application.saved_views import SavedViewService
 from ..application.service import LogService
 from . import (
+    resources,
     tools_alerts,
     tools_analytics,
     tools_configuration,
@@ -48,7 +49,10 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
 
 def build_server(
-    services: ServiceBundle, name: str = "graylog", log_level: LogLevel = "INFO"
+    services: ServiceBundle,
+    name: str = "graylog",
+    log_level: LogLevel = "INFO",
+    resource_cache_seconds: float = resources.CACHE_SECONDS,
 ) -> MCPServer:
     server = MCPServer(name, instructions=INSTRUCTIONS, log_level=log_level)
     tools_search.register(server, services.search)
@@ -57,6 +61,7 @@ def build_server(
     tools_views.register(server, services.views)
     tools_operations.register(server, services.operations)
     tools_configuration.register(server, services.configuration)
+    resources.register(server, services, resources.TtlCache(resource_cache_seconds))
     tools_incident.register(
         server,
         IncidentService(

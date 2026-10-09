@@ -21,7 +21,11 @@ from graylog_mcp.infrastructure.graylog_api import (
     timerange_json,
     total_count,
 )
-from graylog_mcp.infrastructure.graylog_http import GraylogStore, build_http_client
+from graylog_mcp.infrastructure.graylog_http import (
+    DEFAULT_STREAM_ID,
+    GraylogStore,
+    build_http_client,
+)
 
 
 class Recorder:
@@ -53,22 +57,66 @@ class ReadEndpointsTest(unittest.TestCase):
         self.assertEqual((info.version, info.hostname, info.timezone), ("6.1", "h", None))
         self.assertEqual(rec.requests[0].url.path, "/api/system")
 
-    def test_streams_maps_flags(self):
-        store, _ = store_with(
-            ok(
-                {
-                    "streams": [
-                        {"id": "a", "title": "A", "is_default": True},
-                        {"id": "b", "title": "B", "disabled": True},
-                        {"title": "no id, skipped"},
-                    ]
-                }
-            )
+    def test_streams_are_paged_by_graylog_without_the_default_stream(self):
+        body = {
+            "total": 40,  # every stream, ignoring the query
+            "pagination": {"total": 39, "count": 2, "page": 3, "per_page": 2},
+            "elements": [
+                {"id": "b", "title": "B", "disabled": True},
+                {"title": "no id, skipped"},
+                {"id": DEFAULT_STREAM_ID, "is_default": True},  # never sent; dropped anyway
+            ],
+        }
+        store, rec = store_with(ok(body))
+        page = store.streams(offset=4, limit=2)
+        self.assertEqual(rec.requests[0].url.path, "/api/streams/paginated")
+        self.assertEqual(
+            dict(rec.requests[0].url.params),
+            {
+                "page": "3",
+                "per_page": "2",
+                "query": f"-id:{DEFAULT_STREAM_ID}",
+                "sort": "title",
+                "order": "asc",
+            },
         )
-        streams = store.streams()
-        self.assertEqual([s.id for s in streams], ["a", "b"])
-        self.assertTrue(streams[0].is_default)
-        self.assertTrue(streams[1].disabled)
+        self.assertEqual([(s.id, s.disabled) for s in page.items], [("b", True)])
+        self.assertEqual((page.total, page.next_offset), (39, 6))
+
+    def test_streams_total_falls_back_to_the_items(self):
+        store, _ = store_with(ok({"elements": [{"id": "a"}]}))
+        self.assertEqual(store.streams(offset=0, limit=5).total, 1)
+
+    def test_streams_without_paginated_endpoint_are_paged_locally(self):
+        def reply(request):
+            if request.url.path == "/api/streams/paginated":
+                return httpx.Response(404)
+            return httpx.Response(
+                200,
+                json={
+                    "streams": [
+                        {"id": DEFAULT_STREAM_ID, "is_default": True},
+                        {"id": "a"},
+                        {"id": "b"},
+                        {"id": "c"},
+                    ]
+                },
+            )
+
+        store, _ = store_with(reply)
+        page = store.streams(offset=1, limit=5)
+        self.assertEqual([s.id for s in page.items], ["b", "c"])
+        self.assertEqual((page.total, page.next_offset), (3, 3))
+
+    def test_stream_exists(self):
+        found = "6abbd6f9d55b345cd2488cfa"
+        store, rec = store_with(
+            lambda request: httpx.Response(200 if found in request.url.path else 404, json={})
+        )
+        self.assertTrue(store.stream_exists(found))
+        self.assertFalse(store.stream_exists("aaaaaaaaaaaaaaaaaaaaaaaa"))
+        self.assertFalse(store.stream_exists("nope"))  # malformed: Graylog would answer 500
+        self.assertEqual(len(rec.requests), 2)
 
     def test_fetch_unwraps_message_fields_and_escapes_path(self):
         # Shape returned by GET /api/messages/{index}/{id} on Graylog 7.
@@ -226,6 +274,9 @@ class ClientFactoryTest(unittest.TestCase):
     def test_total_count_variants(self):
         self.assertEqual(total_count({"total": 3}, "total"), 3)
         self.assertEqual(total_count({"pagination": {"total": 4}}), 4)
+        # The filtered pagination total wins over an unfiltered top-level total.
+        self.assertEqual(total_count({"total": 9, "pagination": {"total": 4}}, "total"), 4)
+        self.assertEqual(total_count({"total": 9, "pagination": {}}, "total"), 9)
         self.assertIsNone(total_count({"other": 1}, "total"))
         self.assertIsNone(number(object()))
         self.assertEqual(objects([{}, "x"]), [{}])

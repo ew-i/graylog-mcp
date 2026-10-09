@@ -56,8 +56,12 @@ class FakeLogStore:
     def cluster_info(self) -> ClusterInfo:
         return self.info
 
-    def streams(self) -> list[Stream]:
-        return list(self.stream_list)
+    def streams(self, offset: int, limit: int) -> ListingPage:
+        page = tuple(self.stream_list[offset : offset + limit])
+        return ListingPage(len(self.stream_list), page, next_offset=offset + len(page))
+
+    def stream_exists(self, stream_id: str) -> bool:
+        return any(s.id == stream_id for s in self.stream_list)
 
     def search(self, query: LogQuery) -> SearchPage:
         self.queries.append(query)

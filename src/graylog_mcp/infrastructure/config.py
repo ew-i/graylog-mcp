@@ -52,6 +52,9 @@ class Settings(BaseSettings):
     )
     allowed_hosts: str = Field("", validation_alias="MCP_ALLOWED_HOSTS")
     allowed_origins: str = Field("", validation_alias="MCP_ALLOWED_ORIGINS")
+    resource_cache_seconds: float = Field(
+        60.0, ge=0, validation_alias="MCP_RESOURCE_CACHE_SECONDS"
+    )
 
     @field_validator(
         "base_url",

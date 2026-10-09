@@ -1,7 +1,8 @@
 # graylog-mcp
 
-Read-only Graylog access exposed as 28 MCP tools over stdio or Streamable HTTP:
-search, analysis, alerts, saved searches, cluster health and configuration.
+Read-only Graylog access exposed as 28 MCP tools, 7 MCP resources and one
+resource template over stdio or Streamable HTTP: search, analysis, alerts, saved
+searches, cluster health and configuration.
 
 [![build](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml) [![coverage](https://raw.githubusercontent.com/ew-i/badges/main/graylog-mcp/coverage.svg)](https://github.com/ew-i/graylog-mcp)
 
@@ -52,6 +53,31 @@ Failures never raise: they return `{"error": ..., "kind": ...}`. An unexpected
 internal error has kind `Internal` and is logged with its traceback to stderr;
 in `investigate_incident` it replaces only the failing section.
 
+## Resources
+
+Stable reference data is also exposed as MCP resources, so a client can attach
+it as context without a tool call. The Graylog-backed resources return the same
+JSON as the matching tool (redacted; failures as `{"error": ..., "kind": ...}`).
+
+| Resource                               | Contents                                         | Same as             |
+|----------------------------------------|--------------------------------------------------|---------------------|
+| `graylog://streams`                    | Streams you may query, with IDs                  | `browse_streams`    |
+| `graylog://saved-searches`             | Saved searches, with IDs for `run_saved_search`  | `saved_searches`    |
+| `graylog://streams/{stream_id}/fields` | Field names in a stream's newest messages (30 d) | `discover_fields`   |
+| `graylog://cluster/status`             | Version, cluster identity, processing state      | `cluster_status`    |
+| `graylog://alerts/definitions`         | Event/alert definitions                          | `alert_definitions` |
+| `graylog://config/index-sets`          | Rotation and retention                           | `index_sets`        |
+| `graylog://config/pipelines`           | Pipelines, stages and rules                      | `pipeline_rules`    |
+| `graylog://guide/query-syntax`         | Query syntax and how to use these tools          | static Markdown     |
+
+`graylog://streams/{stream_id}/fields` is a resource template; clients list it
+separately from the fixed resources. Successful Graylog reads are cached per
+URI (60 seconds by default; set `MCP_RESOURCE_CACHE_SECONDS` or
+`--resource-cache-seconds`, `0` disables), so repeated reads do not refetch;
+failures are not cached. Catalogue resources return the first 200 entries with
+the usual `has_more`/`next_cursor`; page further with the tool. Tools are never
+cached; use them when the data must be current, such as cluster health.
+
 ## Layout
 
 ```
@@ -72,8 +98,10 @@ src/graylog_mcp/
     graylog_http.py  graylog_analytics.py  graylog_alerts.py
     graylog_views.py  graylog_system.py  graylog_config.py
     config.py         Pydantic Settings loaded from the environment
-  interface/        MCP tools, one module per area
+  interface/        MCP tools, one module per area, and resources
     mcp_tools.py      ServiceBundle + build_server
+    resources.py      graylog:// resources with a short-lived cache
+    query_guide.py    text of the graylog://guide/query-syntax resource
     tools_*.py  responses.py
   cli.py             argparse entrypoint and composition root
 tests/              domain, services (with fakes), adapters (MockTransport), MCP round trips
@@ -97,6 +125,7 @@ tests/              domain, services (with fakes), adapters (MockTransport), MCP
 | `MCP_ENABLE_DNS_REBINDING_PROTECTION` | no       | `false`                   |
 | `MCP_ALLOWED_HOSTS`                   | no       | empty                     |
 | `MCP_ALLOWED_ORIGINS`                 | no       | empty                     |
+| `MCP_RESOURCE_CACHE_SECONDS`          | no       | `60`                      |
 
 MCP responses redact built-in credential fields and common credential patterns.
 Add application-specific field names as a comma-separated list with
@@ -130,6 +159,7 @@ the MCP SDK's `:*` port wildcard, such as `localhost:*` or
 | `--enable-dns-rebinding-protection` / `--no-enable-dns-rebinding-protection` | Validate HTTP `Host` and `Origin` headers                         |
 | `--allowed-hosts`                                                            | Comma-separated allowed HTTP `Host` values                        |
 | `--allowed-origins`                                                          | Comma-separated allowed HTTP `Origin` values                      |
+| `--resource-cache-seconds`                                                   | Seconds MCP resource reads are cached; `0` disables caching       |
 
 Settings are also read from `.env`. Precedence is CLI
 arguments, process environment variables, `.env`, then the declared defaults.

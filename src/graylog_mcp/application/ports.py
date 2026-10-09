@@ -29,7 +29,6 @@ from ..domain.models import (
     LogEntry,
     LogQuery,
     SearchPage,
-    Stream,
 )
 from ..domain.operations import InputStatus, NodeStatus, NodeThroughput, SystemNotification
 from ..domain.views import SavedQuery
@@ -40,7 +39,11 @@ class LogStore(Protocol):
 
     def cluster_info(self) -> ClusterInfo: ...
 
-    def streams(self) -> list[Stream]: ...
+    def streams(self, offset: int, limit: int) -> ListingPage:
+        """Readable streams other than Graylog's default "All messages" stream."""
+        ...
+
+    def stream_exists(self, stream_id: str) -> bool: ...
 
     def search(self, query: LogQuery) -> SearchPage: ...
 

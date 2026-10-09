@@ -53,20 +53,19 @@ class CatalogueTest(ServiceTestCase):
     def test_cluster_info_is_plain_dict(self):
         self.assertEqual(self.service.cluster_info()["version"], "6.1.0")
 
-    def test_streams_excludes_default_stream(self):
-        self.store.stream_list = [
-            Stream("d", "All messages", None, False, is_default=True),
-            Stream("s1", "api", "API pods", False, is_default=False),
-        ]
+    def test_streams_shape(self):
+        self.store.stream_list = [Stream("s1", "api", "API pods", False)]
         result = self.service.streams()
         self.assertEqual(result["total"], 1)
-        self.assertEqual(result["streams"][0]["id"], "s1")
-        self.assertNotIn("is_default", result["streams"][0])
+        self.assertEqual(
+            result["streams"],
+            [{"id": "s1", "title": "api", "description": "API pods", "disabled": False}],
+        )
 
     def test_streams_cursor_returns_next_page(self):
         self.store.stream_list = [
-            Stream("s1", "one", None, False, False),
-            Stream("s2", "two", None, False, False),
+            Stream("s1", "one", None, False),
+            Stream("s2", "two", None, False),
         ]
         first = self.service.streams(limit=1)
         second = self.service.streams(limit=1, next_cursor=first["next_cursor"])
@@ -216,7 +215,7 @@ class SearchPaginationTest(ServiceTestCase):
             )
 
     def test_cursor_from_another_tool_is_rejected(self):
-        self.store.stream_list = [Stream(f"s{i}", "t", None, False, False) for i in range(3)]
+        self.store.stream_list = [Stream(f"s{i}", "t", None, False) for i in range(3)]
         streams = self.service.streams(limit=1)
         with self.assertRaisesRegex(InvalidRequestError, "different tool"):
             self.service.search_recent(
@@ -311,12 +310,24 @@ class TopValuesTest(ServiceTestCase):
 
 
 class DiscoverFieldsTest(ServiceTestCase):
+    def setUp(self):
+        super().setUp()
+        self.store.stream_list = [Stream("s1", "api", None, False)]
+
     def test_union_across_sample(self):
-        self.store.entries = [{"a": 1}, {"b": 2, "a": 3}]
-        result = self.service.discover_fields(stream_id="s1", seconds=60)
+        self.store.entries = [{"a": 1}, {"b": 2, "a": 3, "gl2_remote_ip": "10.0.0.1"}]
+        result = self.service.discover_fields(stream_id=" s1 ", seconds=60)
         self.assertEqual(result["fields"], ["a", "b"])
         self.assertEqual(result["count"], 2)
-        self.assertEqual(self.store.last_query.text, "*")
+        self.assertEqual(result["stream_id"], "s1")
+        self.assertEqual(
+            (self.store.last_query.text, self.store.last_query.stream_id), ("*", "s1")
+        )
+
+    def test_unknown_stream_is_not_found(self):
+        with self.assertRaisesRegex(NotFoundError, "'nope' does not exist"):
+            self.service.discover_fields(stream_id="nope", seconds=60)
+        self.assertEqual(self.store.queries, [])  # no search was sent
 
     def test_stream_required(self):
         with self.assertRaises(InvalidRequestError):

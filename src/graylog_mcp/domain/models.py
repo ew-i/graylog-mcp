@@ -181,7 +181,6 @@ class Stream:
     title: str | None
     description: str | None
     disabled: bool
-    is_default: bool
 
 
 @dataclass(frozen=True)

@@ -154,7 +154,8 @@ def register(server: MCPServer, service: LogService) -> None:
     @server.tool()
     def discover_fields(stream_id: str, range_seconds: int = 3600) -> str:
         """List field names present in recent messages of a stream, to learn
-        what can be searched or aggregated.
+        what can be searched or aggregated. Graylog's internal fields (gl2_*,
+        _id, streams) are left out; an unknown stream returns NotFound.
 
         Args:
             stream_id: Required. Access is enforced per stream; get IDs from browse_streams.

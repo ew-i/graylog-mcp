@@ -111,13 +111,17 @@ def integer(value: Any) -> int | None:
 
 
 def total_count(body: Mapping[str, Any], *keys: str) -> int | None:
+    """`pagination.total` counts the filtered matches; some endpoints' top-level
+    `total` counts everything (e.g. /api/streams/paginated), so it comes first."""
+    pagination = body.get("pagination")
+    if isinstance(pagination, dict):
+        value = integer(pagination.get("total"))
+        if value is not None:
+            return value
     for key in keys:
         value = integer(body.get(key))
         if value is not None:
             return value
-    pagination = body.get("pagination")
-    if isinstance(pagination, dict):
-        return integer(pagination.get("total"))
     return None
 
 

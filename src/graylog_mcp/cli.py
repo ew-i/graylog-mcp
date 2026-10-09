@@ -99,6 +99,11 @@ def parse_args(argv: Sequence[str] | None = None) -> Settings:
         "--allowed-origins",
         help="Comma-separated Origin header values allowed for HTTP transports",
     )
+    parser.add_argument(
+        "--resource-cache-seconds",
+        type=float,
+        help="How long MCP resource reads are cached; 0 disables caching",
+    )
     try:
         return Settings(**vars(parser.parse_args(argv))).validated()
     except ValidationError as exc:
@@ -113,7 +118,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     with build_http_client(settings) as http:
-        server = build_server(wire(http), log_level=settings.log_level)
+        server = build_server(
+            wire(http),
+            log_level=settings.log_level,
+            resource_cache_seconds=settings.resource_cache_seconds,
+        )
         if settings.transport == "streamable-http":
             server.run(
                 transport=settings.transport,

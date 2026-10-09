@@ -31,8 +31,11 @@ def rank_values(entries: Iterable[LogEntry], field_name: str, top: int) -> list[
 
 
 def field_names(entries: Iterable[LogEntry]) -> list[str]:
-    """Sorted union of field names across all entries."""
+    """Sorted union of the queryable field names across all entries.
+
+    Graylog bookkeeping fields are left out, exactly as `LogEntry.visible` does.
+    """
     names: set[str] = set()
     for entry in entries:
-        names.update(entry.fields)
+        names.update(entry.visible())
     return sorted(names)
