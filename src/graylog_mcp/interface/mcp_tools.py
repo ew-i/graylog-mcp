@@ -13,6 +13,7 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.alerts import AlertService
 from ..application.analytics import AnalyticsService
+from ..application.capabilities import CapabilityService
 from ..application.configuration import ConfigurationService
 from ..application.incident import IncidentService
 from ..application.operations import OperationsService
@@ -23,6 +24,7 @@ from . import (
     resources,
     tools_alerts,
     tools_analytics,
+    tools_capabilities,
     tools_configuration,
     tools_incident,
     tools_operations,
@@ -39,12 +41,14 @@ class ServiceBundle:
     views: SavedViewService
     operations: OperationsService
     configuration: ConfigurationService
+    capabilities: CapabilityService
 
 
 INSTRUCTIONS = (
     "Read-only Graylog access. Call browse_streams first: "
     "searches and analyses need a stream_id. For troubleshooting, "
-    "recent_alerts, count_over_time and compare_windows are good starting points."
+    "recent_alerts, count_over_time and compare_windows are good starting points. "
+    "server_capabilities says which tools this Graylog version cannot serve."
 )
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 
@@ -62,6 +66,7 @@ def build_server(
     tools_views.register(server, services.views)
     tools_operations.register(server, services.operations)
     tools_configuration.register(server, services.configuration)
+    tools_capabilities.register(server, services.capabilities)
     resources.register(server, services, resources.TtlCache(resource_cache_seconds))
     prompts.register(server)
     tools_incident.register(

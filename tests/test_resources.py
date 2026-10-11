@@ -7,6 +7,7 @@ from mcp.server.mcpserver import MCPServer
 
 from graylog_mcp.application.alerts import AlertService
 from graylog_mcp.application.analytics import AnalyticsService
+from graylog_mcp.application.capabilities import CapabilityService
 from graylog_mcp.application.configuration import ConfigurationService
 from graylog_mcp.application.operations import OperationsService
 from graylog_mcp.application.saved_views import SavedViewService
@@ -20,6 +21,7 @@ from graylog_mcp.interface.mcp_tools import ServiceBundle, build_server
 from .fakes import (
     FakeAggregationStore,
     FakeAlertStore,
+    FakeCapabilityStore,
     FakeConfigStore,
     FakeLogStore,
     FakeSystemStore,
@@ -30,6 +32,7 @@ CACHED_RESOURCES = {
     "graylog://streams",
     "graylog://saved-searches",
     "graylog://cluster/status",
+    "graylog://cluster/capabilities",
     "graylog://alerts/definitions",
     "graylog://config/index-sets",
     "graylog://config/pipelines",
@@ -62,6 +65,7 @@ class ResourceCatalogueTest(unittest.TestCase):
                 views=SavedViewService(views, search),
                 operations=OperationsService(FakeSystemStore()),
                 configuration=ConfigurationService(FakeConfigStore()),
+                capabilities=CapabilityService(logs, FakeCapabilityStore()),
             )
         )
 
@@ -123,7 +127,7 @@ class ResourceCatalogueTest(unittest.TestCase):
 class ResourceCacheTest(unittest.TestCase):
     def setUp(self):
         self.now = 0.0
-        self.services = ServiceBundle(*(Mock() for _ in range(6)))
+        self.services = ServiceBundle(*(Mock() for _ in range(7)))
         self.server = MCPServer("test")
         resources.register(self.server, self.services, resources.TtlCache(60, clock=lambda: self.now))
 
@@ -201,7 +205,7 @@ class ResourceCacheTest(unittest.TestCase):
 
     def test_given_cache_seconds_when_building_server_then_descriptions_state_them(self):
         # Given
-        server = build_server(ServiceBundle(*(Mock() for _ in range(6))), resource_cache_seconds=5)
+        server = build_server(ServiceBundle(*(Mock() for _ in range(7))), resource_cache_seconds=5)
 
         # When
         descriptions = {r.description for r in asyncio.run(server.list_resources()) if r.mime_type == "application/json"}

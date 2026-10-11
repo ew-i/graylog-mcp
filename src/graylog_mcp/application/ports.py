@@ -14,6 +14,7 @@ from typing import Protocol
 
 from ..domain.aggregation import AggregationQuery, AggregationTable
 from ..domain.alerts import EventPage, EventQuery
+from ..domain.capabilities import Capability
 from ..domain.configuration import (
     IndexSet,
     LookupResult,
@@ -53,6 +54,12 @@ class LogStore(Protocol):
 
     def field_types(self, stream_id: str, window: TimeWindow) -> list[FieldInfo]:
         """Indexed fields with their capabilities; UnsupportedError without the API."""
+        ...
+
+
+class CapabilityStore(Protocol):
+    def capabilities(self) -> dict[Capability, bool | None]:
+        """Whether each optional API exists; None when the server did not answer."""
         ...
 
 

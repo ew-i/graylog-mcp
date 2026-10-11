@@ -27,7 +27,7 @@ SAMPLE_ARGUMENTS = {
 
 class PromptTest(unittest.TestCase):
     def setUp(self):
-        self.server = build_server(ServiceBundle(*(Mock() for _ in range(6))))
+        self.server = build_server(ServiceBundle(*(Mock() for _ in range(7))))
         self.tools = {t.name for t in asyncio.run(self.server.list_tools())}
 
     def messages(self, name: str, **arguments):

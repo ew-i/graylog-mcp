@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from ..domain.capabilities import Capability
 from ..domain.errors import NotFoundError, UnsupportedError
 from ..domain.models import (
     Between,
@@ -31,6 +32,7 @@ from .graylog_api import (
     timerange_json,
     total_count,
 )
+from .graylog_capabilities import GraylogCapabilities
 
 __all__ = ["GraylogStore", "build_http_client"]
 
@@ -38,6 +40,7 @@ __all__ = ["GraylogStore", "build_http_client"]
 # is_default, so it is excluded by this fixed ID instead.
 DEFAULT_STREAM_ID = "000000000000000000000001"
 _OBJECT_ID = re.compile(r"[0-9a-fA-F]{24}")
+_NO_FIELD_TYPES = "this Graylog server has no field-types API"
 
 _SEARCH_PATHS = {
     LastSeconds: "/api/search/universal/relative",
@@ -77,8 +80,11 @@ def _index(hit: dict[str, Any]) -> str | None:
 
 
 class GraylogStore:
-    def __init__(self, client: httpx.Client) -> None:
+    def __init__(
+        self, client: httpx.Client, capabilities: GraylogCapabilities | None = None
+    ) -> None:
         self._api = GraylogApi(client)
+        self._capabilities = capabilities or GraylogCapabilities(client)
 
     def cluster_info(self) -> ClusterInfo:
         body = self._api.get_object("/api/system")
@@ -93,28 +99,31 @@ class GraylogStore:
         )
 
     def streams(self, offset: int, limit: int) -> ListingPage:
-        try:
-            body = self._api.get_object(
-                "/api/streams/paginated",
-                params={
-                    "page": page_number(offset, limit),
-                    "per_page": limit,
-                    "query": f"-id:{DEFAULT_STREAM_ID}",
-                    "sort": "title",
-                    "order": "asc",
-                },
-            )
-        except NotFoundError:  # servers without the paginated endpoint list everything
-            every = _streams(self._api.get_object("/api/streams").get("streams"))
-            page = every[offset : offset + limit]
-            return ListingPage(total=len(every), items=page, next_offset=offset + len(page))
-        items = _streams(body.get("elements"))
-        total = total_count(body, "total")
-        return ListingPage(
-            total=total if total is not None else len(items),
-            items=items,
-            next_offset=offset + limit,
-        )
+        if self._capabilities.known(Capability.PAGINATED_STREAMS) is not False:
+            try:
+                body = self._api.get_object(
+                    "/api/streams/paginated",
+                    params={
+                        "page": page_number(offset, limit),
+                        "per_page": limit,
+                        "query": f"-id:{DEFAULT_STREAM_ID}",
+                        "sort": "title",
+                        "order": "asc",
+                    },
+                )
+            except NotFoundError:  # servers without the paginated endpoint list everything
+                self._capabilities.record(Capability.PAGINATED_STREAMS, False)
+            else:
+                items = _streams(body.get("elements"))
+                total = total_count(body, "total")
+                return ListingPage(
+                    total=total if total is not None else len(items),
+                    items=items,
+                    next_offset=offset + limit,
+                )
+        every = _streams(self._api.get_object("/api/streams").get("streams"))
+        page = every[offset : offset + limit]
+        return ListingPage(total=len(every), items=page, next_offset=offset + len(page))
 
     def stream_exists(self, stream_id: str) -> bool:
         if not _OBJECT_ID.fullmatch(stream_id):
@@ -148,13 +157,17 @@ class GraylogStore:
         )
 
     def field_types(self, stream_id: str, window: TimeWindow) -> list[FieldInfo]:
+        if self._capabilities.known(Capability.FIELD_TYPES) is False:
+            raise UnsupportedError(_NO_FIELD_TYPES)
         try:
             items = self._api.post_list(
                 "/api/views/fields",
                 {"streams": [stream_id], "timerange": timerange_json(window)},
             )
         except NotFoundError as exc:
-            raise UnsupportedError("this Graylog server has no field-types API") from exc
+            if self._capabilities.supports(Capability.FIELD_TYPES):
+                raise  # the API exists, so the stream does not
+            raise UnsupportedError(_NO_FIELD_TYPES) from exc
         fields = []
         for item in objects(items):
             kind = item.get("type") if isinstance(item.get("type"), dict) else {}

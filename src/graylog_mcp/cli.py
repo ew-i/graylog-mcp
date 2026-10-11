@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from .application.alerts import AlertService
 from .application.analytics import AnalyticsService
+from .application.capabilities import CapabilityService
 from .application.configuration import ConfigurationService
 from .application.operations import OperationsService
 from .application.saved_views import SavedViewService
@@ -19,23 +20,29 @@ from .infrastructure.config import ConfigError, Settings, settings_error
 from .infrastructure.graylog_alerts import GraylogAlertStore
 from .infrastructure.graylog_analytics import GraylogAnalyticsStore
 from .infrastructure.graylog_api import build_http_client
+from .infrastructure.graylog_capabilities import GraylogCapabilities
 from .infrastructure.graylog_config import GraylogConfigStore
 from .infrastructure.graylog_http import GraylogStore
 from .infrastructure.graylog_system import GraylogSystemStore
 from .infrastructure.graylog_views import GraylogViewStore
 from .interface.mcp_tools import ServiceBundle, build_server
+from .interface.resources import CACHE_SECONDS
 
 
-def wire(http: httpx.Client) -> ServiceBundle:
-    logs = GraylogStore(http)
+def wire(http: httpx.Client, cache_seconds: float = CACHE_SECONDS) -> ServiceBundle:
+    """`cache_seconds` also bounds how long the adapters trust what they learned
+    about the server's optional APIs."""
+    capabilities = GraylogCapabilities(http, ttl=cache_seconds)
+    logs = GraylogStore(http, capabilities)
     search = LogService(logs)
     return ServiceBundle(
         search=search,
-        analytics=AnalyticsService(logs, GraylogAnalyticsStore(http)),
+        analytics=AnalyticsService(logs, GraylogAnalyticsStore(http, capabilities)),
         alerts=AlertService(GraylogAlertStore(http)),
         views=SavedViewService(GraylogViewStore(http), search),
         operations=OperationsService(GraylogSystemStore(http)),
         configuration=ConfigurationService(GraylogConfigStore(http)),
+        capabilities=CapabilityService(logs, capabilities),
     )
 
 
@@ -119,7 +126,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     with build_http_client(settings) as http:
         server = build_server(
-            wire(http),
+            wire(http, settings.resource_cache_seconds),
             log_level=settings.log_level,
             resource_cache_seconds=settings.resource_cache_seconds,
         )

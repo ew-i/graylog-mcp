@@ -187,6 +187,19 @@ class Run:
             assert (top["value"], top["count"]) == ("NullPointerException in CartService", 4)
             return f"top message x{top['count']}"
 
+        def capabilities() -> str:
+            body = self.ok("server_capabilities")
+            found = {name: c["available"] for name, c in body["capabilities"].items()}
+            expected = {"aggregation": self.version >= (5, 1)}
+            expected["time_grouping"] = self.version >= TIME_GROUPING_SINCE
+            if self.version >= (5, 1):  # older servers are not verified for the rest yet
+                expected |= dict.fromkeys(
+                    ("field_types", "query_validation", "paginated_streams"), True
+                )
+            wrong = {k: found[k] for k, v in expected.items() if found[k] is not v}
+            assert not wrong, f"expected {expected}, got {found}"
+            return f"unsupported: {', '.join(body['unsupported_tools']) or 'none'}"
+
         def histogram() -> str:
             args = {"query": q, "stream_id": s, "range_seconds": 3600, "interval": "5m"}
             if (5, 1) <= self.version < TIME_GROUPING_SINCE:
@@ -357,6 +370,7 @@ class Run:
             ("discover_fields unknown stream", unknown_stream),
             ("count_matches", count),
             ("rank_field_values on message", rank),
+            ("server_capabilities", capabilities),
             ("count_over_time (5.1+)", histogram),
             ("exact_field_counts (5.1+)", exact),
             ("compare_windows per value (5.1+)", compare),

@@ -22,13 +22,17 @@ from ..domain.aggregation import (
     TimeGrouping,
     ValuesGrouping,
 )
+from ..domain.capabilities import Capability
 from ..domain.errors import BackendError, NotFoundError, UnsupportedError
 from .graylog_api import GraylogApi, timerange_json
+from .graylog_capabilities import AGGREGATE_PATH, NO_TIME_GROUPING, GraylogCapabilities
 
-AGGREGATE_PATH = "/api/search/aggregate"
 _STREAM_GROUP_LIMIT = 100
-# How a Search Scripting API without time grouping (e.g. Graylog 5.1) rejects it.
-_NO_TIME_GROUPING = "Unable to map property timeunit"
+_NO_AGGREGATION = "server-side aggregation needs the Search Scripting API (Graylog 5.1 or newer)"
+_NO_TIME_BUCKETS = (
+    "this Graylog version's Search Scripting API cannot group by time "
+    "(Graylog 5.1 cannot); count matches per window with count_matches instead"
+)
 
 
 def _grouping_json(group) -> dict[str, Any]:
@@ -55,10 +59,18 @@ def _key(value: Any) -> str | None:
 
 
 class GraylogAnalyticsStore:
-    def __init__(self, client: httpx.Client) -> None:
+    def __init__(
+        self, client: httpx.Client, capabilities: GraylogCapabilities | None = None
+    ) -> None:
         self._api = GraylogApi(client)
+        self._capabilities = capabilities or GraylogCapabilities(client)
 
     def aggregate(self, query: AggregationQuery) -> AggregationTable:
+        if self._capabilities.known(Capability.AGGREGATION) is False:
+            raise UnsupportedError(_NO_AGGREGATION)
+        timed = any(isinstance(g, TimeGrouping) for g in query.groups)
+        if timed and self._capabilities.known(Capability.TIME_GROUPING) is False:
+            raise UnsupportedError(_NO_TIME_BUCKETS)
         synthetic = not query.groups
         groups = (
             [{"field": "streams", "limit": _STREAM_GROUP_LIMIT}]
@@ -83,15 +95,13 @@ class GraylogAnalyticsStore:
         try:
             response = self._api.post_object(AGGREGATE_PATH, body)
         except NotFoundError as exc:
-            raise UnsupportedError(
-                "server-side aggregation needs the Search Scripting API (Graylog 5.1 or newer)"
-            ) from exc
+            if self._capabilities.supports(Capability.AGGREGATION):
+                raise  # the API exists, so something the query names does not
+            raise UnsupportedError(_NO_AGGREGATION) from exc
         except BackendError as exc:
-            if _NO_TIME_GROUPING in str(exc):
-                raise UnsupportedError(
-                    "this Graylog version's Search Scripting API cannot group by time "
-                    "(Graylog 5.1 cannot); count matches per window with count_matches instead"
-                ) from exc
+            if NO_TIME_GROUPING in str(exc):
+                self._capabilities.record(Capability.TIME_GROUPING, False)
+                raise UnsupportedError(_NO_TIME_BUCKETS) from exc
             raise
 
         width = len(groups) + len(metrics)

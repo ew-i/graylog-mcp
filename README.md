@@ -1,16 +1,17 @@
 # graylog-mcp
 
-Read-only Graylog access exposed as 28 MCP tools, 7 MCP resources, one resource
+Read-only Graylog access exposed as 29 MCP tools, 8 MCP resources, one resource
 template and 8 workflow prompts over stdio or Streamable HTTP: search, analysis,
 alerts, saved searches, cluster health and configuration.
 
-[![build](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml) [![coverage](https://raw.githubusercontent.com/ew-i/badges/main/graylog-mcp/coverage.svg)](https://github.com/ew-i/graylog-mcp)
+[![build](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml) [![coverage](https://raw.githubusercontent.com/ew-i/badges/main/graylog-mcp/coverage.svg)](https://github.com/ew-i/graylog-mcp) [![codeql](https://github.com/ew-i/graylog-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/codeql.yml) ![Python](https://img.shields.io/badge/python-3.10_%E2%80%93_3.14-yellow?labelColor=blue) ![Graylog](https://img.shields.io/badge/graylog-5.1_%E2%80%93_7.1-08c2fd)
 
 ## Tools
 
 | Area          | Tool                                     | What it does                                                            | Needs              |
 |---------------|------------------------------------------|-------------------------------------------------------------------------|--------------------|
 | Search        | `cluster_status`                         | Version, node, timezone, processing state                               |                    |
+|               | `server_capabilities`                    | Version, optional APIs it offers, tools it cannot serve                 |                    |
 |               | `browse_streams`                         | Streams you may query, with IDs — call first                            |                    |
 |               | `find_recent_logs` / `find_logs_between` | Message search; each hit carries `_index` and `_id`                     |                    |
 |               | `read_log_message`                       | One message in full                                                     |                    |
@@ -39,7 +40,10 @@ alerts, saved searches, cluster health and configuration.
 **5.1+** tools use Graylog's Search Scripting API. On older servers they return
 `{"kind": "Unsupported", ...}`; the rest keep working. `count_over_time` also needs
 time grouping, which the 5.1 API lacks; it is verified on 6.3 and 7.1 (5.2 to 6.2
-are untested). **Needs** lists the token
+are untested). `server_capabilities` checks each optional API on the connected
+server (one request each, none runs a search) and lists the tools that return
+`Unsupported` there. Once an API is known to be missing, tools that need it answer
+`Unsupported` without asking Graylog again, for as long as resources are cached. **Needs** lists the token
 permissions beyond reading streams; without them a tool returns `{"kind": "AccessDenied"}`.
 
 All tools are read-only. Paginated logs, events, streams, dashboards, saved
@@ -61,16 +65,17 @@ Stable reference data is also exposed as MCP resources, so a client can attach
 it as context without a tool call. The Graylog-backed resources return the same
 JSON as the matching tool (redacted; failures as `{"error": ..., "kind": ...}`).
 
-| Resource                               | Contents                                           | Same as             |
-|----------------------------------------|----------------------------------------------------|---------------------|
-| `graylog://streams`                    | Streams you may query, with IDs                    | `browse_streams`    |
-| `graylog://saved-searches`             | Saved searches, with IDs for `run_saved_search`    | `saved_searches`    |
-| `graylog://streams/{stream_id}/fields` | A stream's fields with type and capabilities (30d) | `discover_fields`   |
-| `graylog://cluster/status`             | Version, cluster identity, processing state        | `cluster_status`    |
-| `graylog://alerts/definitions`         | Event/alert definitions                            | `alert_definitions` |
-| `graylog://config/index-sets`          | Rotation and retention                             | `index_sets`        |
-| `graylog://config/pipelines`           | Pipelines, stages and rules                        | `pipeline_rules`    |
-| `graylog://guide/query-syntax`         | Query syntax and how to use these tools            | static Markdown     |
+| Resource                               | Contents                                           | Same as               |
+|----------------------------------------|----------------------------------------------------|-----------------------|
+| `graylog://streams`                    | Streams you may query, with IDs                    | `browse_streams`      |
+| `graylog://saved-searches`             | Saved searches, with IDs for `run_saved_search`    | `saved_searches`      |
+| `graylog://streams/{stream_id}/fields` | A stream's fields with type and capabilities (30d) | `discover_fields`     |
+| `graylog://cluster/status`             | Version, cluster identity, processing state        | `cluster_status`      |
+| `graylog://cluster/capabilities`       | Optional APIs offered, tools this server can't run | `server_capabilities` |
+| `graylog://alerts/definitions`         | Event/alert definitions                            | `alert_definitions`   |
+| `graylog://config/index-sets`          | Rotation and retention                             | `index_sets`          |
+| `graylog://config/pipelines`           | Pipelines, stages and rules                        | `pipeline_rules`      |
+| `graylog://guide/query-syntax`         | Query syntax and how to use these tools            | static Markdown       |
 
 `graylog://streams/{stream_id}/fields` is a resource template; clients list it
 separately from the fixed resources. Successful Graylog reads are cached per
@@ -78,7 +83,8 @@ URI (60 seconds by default; set `MCP_RESOURCE_CACHE_SECONDS` or
 `--resource-cache-seconds`, `0` disables), so repeated reads do not refetch;
 failures are not cached. Catalogue resources return the first 200 entries with
 the usual `has_more`/`next_cursor`; page further with the tool. Tools are never
-cached; use them when the data must be current, such as cluster health.
+cached; use them when the data must be current, such as cluster health. The same
+setting bounds how long the server remembers which optional Graylog APIs exist.
 
 ## Prompts
 
@@ -106,17 +112,21 @@ Without a `stream_id`, a prompt tells the model to pick one with `browse_streams
 src/graylog_mcp/
   domain/           pure models, invariants, analysis — no I/O, no frameworks
     models.py         LogQuery, time windows, LogEntry, Stream, ClusterInfo
+    capabilities.py   optional Graylog APIs (Capability)
     aggregation.py    AggregationQuery, groupings, metrics, intervals
     alerts.py  views.py  operations.py  configuration.py  timeutil.py
     analysis.py       sampled ranking, field discovery
     errors.py         error hierarchy used across all layers
   application/      use cases + policy; depends only on domain and ports
-    ports.py          LogStore, AggregationStore, AlertStore, ViewStore, SystemStore, ConfigStore
+    ports.py          LogStore, AggregationStore, CapabilityStore, AlertStore, ViewStore,
+                      SystemStore, ConfigStore
     policy.py         Limits, clamping, argument parsing
     service.py        LogService (search)
     analytics.py  alerts.py  saved_views.py  operations.py  configuration.py
+    capabilities.py   CapabilityService (server_capabilities)
   infrastructure/   Graylog REST adapters, one per port
     graylog_api.py    shared HTTP client: auth, error mapping, JSON
+    graylog_capabilities.py  probes and remembers which optional APIs exist
     graylog_http.py  graylog_analytics.py  graylog_alerts.py
     graylog_views.py  graylog_system.py  graylog_config.py
     config.py         Pydantic Settings loaded from the environment
@@ -424,5 +434,9 @@ Against your own server, pass `--api-token`, your GELF HTTP input URL and the
 dispatch:
 
 1. **lint**: `ruff check` (findings annotate the PR) and `ruff format --check`
-2. **test**: `pytest` on Python 3.10–3.14, plus a check that the server wires up all 28 tools
+2. **test**: `pytest` on Python 3.10–3.14, plus a check that the server wires up all 29 tools
 3. **build**: builds the sdist and wheel once lint and tests pass, and uploads them as the `dist` artifact
+
+`.github/workflows/codeql.yml` runs CodeQL on the same triggers and weekly, for the
+Python code and the workflows themselves; findings appear under the repository's
+Security tab (code scanning).

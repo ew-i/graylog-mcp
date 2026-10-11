@@ -99,7 +99,9 @@ def main(action: str, version: str) -> None:
     if action == "down":
         subprocess.run([*compose, "down", "--volumes"], env=env, check=True)
         return
-    subprocess.run([*compose, "up", "--detach", "--wait"], env=env, check=True)
+    # No --wait: the image's healthcheck gives up after about 2 minutes, before a first
+    # start (5.1) finishes, and --wait then fails; wait_ready polls the API instead.
+    subprocess.run([*compose, "up", "--detach"], env=env, check=True)
     base = f"http://localhost:{env['WEB_PORT']}"
     running = wait_ready(base)
     ensure_gelf_input(base)

@@ -2,11 +2,13 @@ import unittest
 from datetime import datetime, timezone
 
 from graylog_mcp.application.alerts import AlertService
+from graylog_mcp.application.capabilities import CapabilityService
 from graylog_mcp.application.configuration import ConfigurationService
 from graylog_mcp.application.operations import OperationsService
 from graylog_mcp.application.saved_views import SavedViewService
 from graylog_mcp.application.service import LogService
 from graylog_mcp.domain.alerts import Event, EventDefinition, EventPage
+from graylog_mcp.domain.capabilities import Capability
 from graylog_mcp.domain.configuration import (
     IndexSet,
     LookupResult,
@@ -30,7 +32,14 @@ from graylog_mcp.domain.operations import (
 )
 from graylog_mcp.domain.views import SavedQuery, ViewSummary
 
-from .fakes import FakeAlertStore, FakeConfigStore, FakeLogStore, FakeSystemStore, FakeViewStore
+from .fakes import (
+    FakeAlertStore,
+    FakeCapabilityStore,
+    FakeConfigStore,
+    FakeLogStore,
+    FakeSystemStore,
+    FakeViewStore,
+)
 
 NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
 
@@ -475,3 +484,52 @@ class ConfigurationServiceTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CapabilityServiceTest(unittest.TestCase):
+    def setUp(self):
+        self.store = FakeCapabilityStore()
+        self.service = CapabilityService(FakeLogStore(), self.store)
+
+    def test_given_every_api_when_reporting_then_lists_no_unsupported_tool(self):
+        # When
+        result = self.service.server_capabilities()
+
+        # Then
+        self.assertEqual(result["version"], "6.1.0")
+        self.assertEqual(set(result["capabilities"]), {c.value for c in Capability})
+        self.assertTrue(all(c["available"] for c in result["capabilities"].values()))
+        self.assertEqual(result["unsupported_tools"], [])
+        self.assertNotIn("note", result)
+
+    def test_given_graylog_5_1_when_reporting_then_lists_count_over_time_unsupported(self):
+        # Given
+        self.store.found[Capability.TIME_GROUPING] = False
+
+        # When
+        result = self.service.server_capabilities()
+
+        # Then
+        self.assertEqual(result["unsupported_tools"], ["count_over_time"])
+        self.assertIn("count_matches", result["capabilities"]["time_grouping"]["without_it"])
+
+    def test_given_no_search_scripting_when_reporting_then_lists_every_aggregation_tool_unsupported(self):
+        # Given
+        self.store.found.update({Capability.AGGREGATION: False, Capability.TIME_GROUPING: False})
+
+        # When
+        result = self.service.server_capabilities()
+
+        # Then
+        self.assertEqual(result["unsupported_tools"], ["count_over_time", "exact_field_counts", "field_stats"])
+
+    def test_given_unanswered_check_when_reporting_then_reports_null_with_a_note(self):
+        # Given
+        self.store.found[Capability.QUERY_VALIDATION] = None
+
+        # When
+        result = self.service.server_capabilities()
+
+        # Then
+        self.assertIsNone(result["capabilities"]["query_validation"]["available"])
+        self.assertIn("did not answer", result["note"])

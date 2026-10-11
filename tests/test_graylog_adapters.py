@@ -7,6 +7,7 @@ import httpx
 
 from graylog_mcp.domain.aggregation import AggregationQuery, Metric, TimeGrouping, ValuesGrouping
 from graylog_mcp.domain.alerts import EventQuery
+from graylog_mcp.domain.capabilities import Capability
 from graylog_mcp.domain.errors import (
     BackendError,
     InvalidRequestError,
@@ -16,6 +17,7 @@ from graylog_mcp.domain.errors import (
 from graylog_mcp.domain.models import Between, LastSeconds, ListingQuery
 from graylog_mcp.infrastructure.graylog_alerts import GraylogAlertStore
 from graylog_mcp.infrastructure.graylog_analytics import GraylogAnalyticsStore
+from graylog_mcp.infrastructure.graylog_capabilities import GraylogCapabilities
 from graylog_mcp.infrastructure.graylog_config import GraylogConfigStore
 from graylog_mcp.infrastructure.graylog_system import GraylogSystemStore
 from graylog_mcp.infrastructure.graylog_views import GraylogViewStore
@@ -45,6 +47,138 @@ def make(store_type, routes):
     router = Router(routes)
     client = httpx.Client(base_url="https://gl.example", transport=httpx.MockTransport(router))
     return store_type(client), router
+
+
+def shared(store_type, routes, ttl=60.0):
+    """A store and the capabilities it shares, remembering for `ttl` seconds."""
+    router = Router(routes)
+    client = httpx.Client(base_url="https://gl.example", transport=httpx.MockTransport(router))
+    capabilities = GraylogCapabilities(client, ttl=ttl)
+    return store_type(client, capabilities), capabilities, router
+
+
+# Graylog 5.1: the Search Scripting API exists but rejects time grouping.
+NO_TIMEUNIT = httpx.Response(400, text='{"message":"Unable to map property timeunit. Known properties: field, limit"}')
+TIMED = AggregationQuery("*", "s1", LastSeconds(60), (TimeGrouping("5m"),), (Metric("count"),))
+BY_SOURCE = AggregationQuery("*", "s1", LastSeconds(60), (ValuesGrouping("source", 5),), (Metric("count"),))
+
+
+class CapabilityProbeTest(unittest.TestCase):
+    def probe(self, handler, ttl=60.0, clock=lambda: 0.0):
+        self.requests: list[httpx.Request] = []
+
+        def record(request):
+            self.requests.append(request)
+            return handler(request)
+
+        client = httpx.Client(base_url="https://gl.example", transport=httpx.MockTransport(record))
+        return GraylogCapabilities(client, ttl=ttl, clock=clock)
+
+    def test_given_every_route_answering_when_probing_then_reports_every_capability_available(self):
+        # Given: invalid probe bodies are rejected, which still proves the route exists.
+        capabilities = self.probe(lambda r: httpx.Response(400 if r.method == "POST" else 200, json={}))
+
+        # When
+        found = capabilities.capabilities()
+
+        # Then
+        self.assertEqual(found, dict.fromkeys(Capability, True))
+        self.assertEqual(
+            [(r.method, r.url.path) for r in self.requests],
+            [
+                ("POST", "/api/search/aggregate"),
+                ("POST", "/api/search/aggregate"),
+                ("POST", "/api/views/fields"),
+                ("POST", "/api/search/validate"),
+                ("GET", "/api/streams/paginated"),
+            ],
+        )
+
+    def test_given_probes_when_probing_then_no_aggregation_probe_names_a_stream_or_metric(self):
+        # Given
+        capabilities = self.probe(lambda r: httpx.Response(400, json={}))
+
+        # When
+        capabilities.capabilities()
+
+        # Then
+        aggregations = [json.loads(r.content) for r in self.requests if r.url.path == "/api/search/aggregate"]
+        self.assertEqual(aggregations, [{}, {"group_by": [{"field": "timestamp", "timeunit": "1m"}]}])
+
+    def test_given_no_routes_when_probing_then_reports_nothing_available_and_skips_time_grouping(self):
+        # Given
+        capabilities = self.probe(lambda r: httpx.Response(404))
+
+        # When
+        found = capabilities.capabilities()
+
+        # Then
+        self.assertEqual(found, dict.fromkeys(Capability, False))
+        self.assertEqual(sum(r.url.path == "/api/search/aggregate" for r in self.requests), 1)
+
+    def test_given_graylog_5_1_when_probing_then_reports_time_grouping_missing(self):
+        # Given
+        def reply(request):
+            body = json.loads(request.content) if request.method == "POST" else {}
+            return NO_TIMEUNIT if "group_by" in body else httpx.Response(400, json={})
+
+        capabilities = self.probe(reply)
+
+        # When
+        found = capabilities.capabilities()
+
+        # Then
+        self.assertTrue(found[Capability.AGGREGATION])
+        self.assertFalse(found[Capability.TIME_GROUPING])
+
+    def test_given_refused_permission_when_probing_then_reports_the_api_available(self):
+        # Given
+        capabilities = self.probe(lambda r: httpx.Response(403))
+
+        # When
+        found = capabilities.supports(Capability.QUERY_VALIDATION)
+
+        # Then
+        self.assertTrue(found)
+
+    def test_given_unreachable_graylog_when_probing_then_reports_unknown_and_keeps_nothing(self):
+        # Given
+        def unreachable(request):
+            raise httpx.ConnectError("refused", request=request)
+
+        capabilities = self.probe(unreachable)
+
+        # When
+        found = capabilities.supports(Capability.FIELD_TYPES)
+
+        # Then
+        self.assertIsNone(found)
+        self.assertIsNone(capabilities.known(Capability.FIELD_TYPES))
+
+    def test_given_probed_capability_when_asking_within_and_after_ttl_then_probes_again_only_after(self):
+        # Given
+        now = [0.0]
+        capabilities = self.probe(lambda r: httpx.Response(404), ttl=60, clock=lambda: now[0])
+        capabilities.supports(Capability.PAGINATED_STREAMS)
+
+        # When
+        now[0] = 59.9
+        capabilities.supports(Capability.PAGINATED_STREAMS)
+        now[0] = 60.0
+        capabilities.supports(Capability.PAGINATED_STREAMS)
+
+        # Then
+        self.assertEqual(len(self.requests), 2)
+
+    def test_given_zero_ttl_when_recording_then_remembers_nothing(self):
+        # Given
+        capabilities = self.probe(lambda r: httpx.Response(404), ttl=0)
+
+        # When
+        capabilities.record(Capability.AGGREGATION, False)
+
+        # Then
+        self.assertIsNone(capabilities.known(Capability.AGGREGATION))
 
 
 class AnalyticsAdapterTest(unittest.TestCase):
@@ -184,6 +318,74 @@ class AnalyticsAdapterTest(unittest.TestCase):
 
         # Then
         self.assertRegex(str(raised.exception), "cannot group by time")
+
+    def test_given_time_grouping_rejected_when_aggregating_by_time_again_then_answers_without_a_request(self):
+        # Given
+        store, capabilities, router = shared(GraylogAnalyticsStore, {("POST", "/api/search/aggregate"): NO_TIMEUNIT})
+        with self.assertRaises(UnsupportedError):
+            store.aggregate(TIMED)
+
+        # When
+        with self.assertRaises(UnsupportedError) as raised:
+            store.aggregate(TIMED)
+
+        # Then
+        self.assertRegex(str(raised.exception), "cannot group by time")
+        self.assertEqual(len(router.requests), 1)
+        self.assertFalse(capabilities.known(Capability.TIME_GROUPING))
+
+    def test_given_time_grouping_missing_when_aggregating_by_value_then_still_sends_the_query(self):
+        # Given
+        store, capabilities, router = shared(GraylogAnalyticsStore, {("POST", "/api/search/aggregate"): {"datarows": []}})
+        capabilities.record(Capability.TIME_GROUPING, False)
+
+        # When
+        result = store.aggregate(BY_SOURCE)
+
+        # Then
+        self.assertEqual(result.rows, ())
+        self.assertEqual(len(router.requests), 1)
+
+    def test_given_aggregation_known_missing_when_aggregating_then_raises_unsupported_without_a_request(self):
+        # Given
+        store, capabilities, router = shared(GraylogAnalyticsStore, {})
+        capabilities.record(Capability.AGGREGATION, False)
+
+        # When
+        with self.assertRaises(UnsupportedError) as raised:
+            store.aggregate(BY_SOURCE)
+
+        # Then
+        self.assertIn("5.1", str(raised.exception))
+        self.assertEqual(router.requests, [])
+
+    def test_given_missing_api_when_aggregating_twice_then_probes_once_and_skips_the_second_request(self):
+        # Given
+        store, _, router = shared(GraylogAnalyticsStore, {})
+
+        # When
+        for _ in range(2):
+            with self.assertRaises(UnsupportedError):
+                store.aggregate(BY_SOURCE)
+
+        # Then: the query, then the probe confirming the route is missing.
+        self.assertEqual([json.loads(r.content) for r in router.requests][1], {})
+        self.assertEqual(len(router.requests), 2)
+
+    def test_given_existing_api_answering_404_when_aggregating_then_raises_not_found(self):
+        # Given: the route exists (the empty probe body is rejected), the query's target does not.
+        def reply(request):
+            return httpx.Response(404 if json.loads(request.content) else 400, json={})
+
+        client = httpx.Client(base_url="https://gl.example", transport=httpx.MockTransport(reply))
+        store = GraylogAnalyticsStore(client)
+
+        # When
+        with self.assertRaises(NotFoundError) as raised:
+            store.aggregate(BY_SOURCE)
+
+        # Then
+        self.assertNotIsInstance(raised.exception, UnsupportedError)
 
     def test_given_other_aggregation_error_when_aggregating_then_raises_backend_error(self):
         # Given

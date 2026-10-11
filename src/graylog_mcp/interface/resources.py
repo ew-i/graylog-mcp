@@ -78,6 +78,12 @@ def register(server: MCPServer, services: ServiceBundle, cache: TtlCache | None 
             "Graylog version, cluster identity and processing state (same as cluster_status).",
             services.search.cluster_info,
         ),
+        "graylog://cluster/capabilities": (
+            "cluster-capabilities",
+            "Graylog version, which optional APIs it offers and which tools it cannot serve "
+            "(same as server_capabilities).",
+            services.capabilities.server_capabilities,
+        ),
         "graylog://alerts/definitions": (
             "alert-definitions",
             "Configured event/alert definitions (same as alert_definitions).",

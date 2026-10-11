@@ -43,6 +43,7 @@ class CompositionRootTest(unittest.TestCase):
         self.assertIsNotNone(bundle.views)
         self.assertIsNotNone(bundle.operations)
         self.assertIsNotNone(bundle.configuration)
+        self.assertIsNotNone(bundle.capabilities)
 
     def test_given_no_configuration_when_starting_then_returns_exit_code_one(self):
         # Given

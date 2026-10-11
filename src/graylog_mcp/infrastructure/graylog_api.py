@@ -50,6 +50,9 @@ class GraylogApi:
             raise BackendError(f"expected a JSON array from {path}")
         return body
 
+    def post(self, path: str, body: Mapping[str, Any]) -> Any:
+        return self._send("POST", path, json=body)
+
     def post_object(self, path: str, body: Mapping[str, Any]) -> dict[str, Any]:
         return _expect_object(path, self._send("POST", path, json=body))
 

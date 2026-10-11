@@ -46,7 +46,8 @@ QUERY_SYNTAX = """\
    `exact_field_counts` and `compare_windows`. `exact_field_counts`,
    `field_stats` and the per-value part of `compare_windows` need Graylog
    5.1+, and `count_over_time` a newer version (not 5.1); otherwise they
-   return `{"kind": "Unsupported"}`.
+   return `{"kind": "Unsupported"}`. `server_capabilities` lists the tools
+   this server cannot serve.
 5. Paged results return `next_cursor` while `has_more` is true; pass it back
    unchanged. `truncated` means paging alone will not return everything.
 6. Failures come back as `{"error": ..., "kind": ...}` instead of raising;

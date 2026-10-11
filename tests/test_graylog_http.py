@@ -3,6 +3,7 @@ import unittest
 
 import httpx
 
+from graylog_mcp.domain.capabilities import Capability
 from graylog_mcp.domain.errors import (
     AccessDeniedError,
     BackendError,
@@ -22,6 +23,7 @@ from graylog_mcp.infrastructure.graylog_api import (
     timerange_json,
     total_count,
 )
+from graylog_mcp.infrastructure.graylog_capabilities import GraylogCapabilities
 from graylog_mcp.infrastructure.graylog_http import (
     DEFAULT_STREAM_ID,
     GraylogStore,
@@ -45,6 +47,14 @@ def store_with(reply) -> tuple[GraylogStore, Recorder]:
     recorder = Recorder(reply)
     client = httpx.Client(base_url="https://gl.example", transport=httpx.MockTransport(recorder))
     return GraylogStore(client), recorder
+
+
+def remembering_store_with(reply) -> tuple[GraylogStore, GraylogCapabilities, Recorder]:
+    """A store whose capabilities remember what they learn for a minute."""
+    recorder = Recorder(reply)
+    client = httpx.Client(base_url="https://gl.example", transport=httpx.MockTransport(recorder))
+    capabilities = GraylogCapabilities(client, ttl=60)
+    return GraylogStore(client, capabilities), capabilities, recorder
 
 
 def ok(body) -> callable:
@@ -171,6 +181,54 @@ class ReadEndpointsTest(unittest.TestCase):
 
         # Then
         self.assertEqual(entry.fields, {"_id": "m1", "msg": "x"})
+
+
+class CapabilityAwareStoreTest(unittest.TestCase):
+    def test_given_no_paginated_endpoint_when_listing_streams_twice_then_asks_for_it_only_once(self):
+        # Given
+        def reply(request):
+            if request.url.path == "/api/streams":
+                return httpx.Response(200, json={"streams": [{"id": "a"}]})
+            return httpx.Response(404)
+
+        store, capabilities, rec = remembering_store_with(reply)
+
+        # When
+        store.streams(offset=0, limit=5)
+        page = store.streams(offset=0, limit=5)
+
+        # Then
+        self.assertEqual([s.id for s in page.items], ["a"])
+        self.assertEqual(
+            [r.url.path for r in rec.requests],
+            ["/api/streams/paginated", "/api/streams", "/api/streams"],
+        )
+        self.assertFalse(capabilities.known(Capability.PAGINATED_STREAMS))
+
+    def test_given_field_types_known_missing_when_reading_types_then_raises_unsupported_without_a_request(self):
+        # Given
+        store, capabilities, rec = remembering_store_with(ok([]))
+        capabilities.record(Capability.FIELD_TYPES, False)
+
+        # When
+        with self.assertRaises(UnsupportedError):
+            store.field_types("s1", LastSeconds(60))
+
+        # Then
+        self.assertEqual(rec.requests, [])
+
+    def test_given_existing_api_answering_404_when_reading_types_then_raises_not_found(self):
+        # Given: the probe (no streams) proves the route exists; the query's stream does not.
+        store, _, _ = remembering_store_with(
+            lambda request: httpx.Response(404 if json.loads(request.content)["streams"] else 200, json=[])
+        )
+
+        # When
+        with self.assertRaises(NotFoundError) as raised:
+            store.field_types("s1", LastSeconds(60))
+
+        # Then
+        self.assertNotIsInstance(raised.exception, UnsupportedError)
 
 
 class FieldTypesTest(unittest.TestCase):

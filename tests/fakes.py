@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 
 from graylog_mcp.domain.aggregation import AggregationQuery, AggregationTable
 from graylog_mcp.domain.alerts import EventDefinition, EventPage, EventQuery
+from graylog_mcp.domain.capabilities import Capability
 from graylog_mcp.domain.configuration import (
     IndexSet,
     LookupResult,
@@ -87,6 +88,14 @@ class FakeLogStore:
     @property
     def last_query(self) -> LogQuery:
         return self.queries[-1]
+
+
+@dataclass
+class FakeCapabilityStore:
+    found: dict[Capability, bool | None] = field(default_factory=lambda: dict.fromkeys(Capability, True))
+
+    def capabilities(self) -> dict[Capability, bool | None]:
+        return dict(self.found)
 
 
 @dataclass

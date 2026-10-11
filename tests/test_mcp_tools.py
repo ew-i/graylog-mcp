@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 from graylog_mcp.application.alerts import AlertService
 from graylog_mcp.application.analytics import AnalyticsService
+from graylog_mcp.application.capabilities import CapabilityService
 from graylog_mcp.application.configuration import ConfigurationService
 from graylog_mcp.application.operations import OperationsService
 from graylog_mcp.application.saved_views import SavedViewService
@@ -18,6 +19,7 @@ from graylog_mcp.interface.mcp_tools import ServiceBundle, build_server
 from .fakes import (
     FakeAggregationStore,
     FakeAlertStore,
+    FakeCapabilityStore,
     FakeConfigStore,
     FakeLogStore,
     FakeSystemStore,
@@ -28,6 +30,7 @@ from .fakes import (
 EXPECTED_TOOLS = {
     # search
     "cluster_status",
+    "server_capabilities",
     "browse_streams",
     "find_recent_logs",
     "find_logs_between",
@@ -105,6 +108,7 @@ class McpToolsTest(unittest.TestCase):
                 configuration=ConfigurationService(
                     FakeConfigStore(streams={"s1": StreamConfig("s1", "api", None, "AND", False, None, ())})
                 ),
+                capabilities=CapabilityService(self.logs, FakeCapabilityStore()),
             )
         )
 
@@ -146,6 +150,14 @@ class McpToolsTest(unittest.TestCase):
 
         # Then
         self.assertEqual(result["streams"][0]["id"], "s1")
+
+    def test_given_real_services_when_asking_for_capabilities_then_reports_version_and_capabilities(self):
+        # When
+        result = self.call("server_capabilities")
+
+        # Then
+        self.assertEqual(result["version"], "6.1.0")
+        self.assertEqual(result["unsupported_tools"], [])
 
     def test_given_real_services_when_investigating_then_no_section_is_an_error(self):
         # Given: real services, so a call that no longer fits a service's signature
@@ -231,9 +243,11 @@ class McpToolsTest(unittest.TestCase):
         views = Mock()
         operations = Mock()
         configuration = Mock()
-        server = build_server(ServiceBundle(search, analytics, alerts, views, operations, configuration))
+        capabilities = Mock()
+        server = build_server(ServiceBundle(search, analytics, alerts, views, operations, configuration, capabilities))
         cases = {
             "cluster_status": (search, "cluster_info", {}),
+            "server_capabilities": (capabilities, "server_capabilities", {}),
             "browse_streams": (search, "streams", {"limit": 50, "next_cursor": ""}),
             "find_recent_logs": (
                 search,
