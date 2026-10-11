@@ -118,8 +118,8 @@ src/graylog_mcp/
     analysis.py       sampled ranking, field discovery
     errors.py         error hierarchy used across all layers
   application/      use cases + policy; depends only on domain and ports
-    ports.py          LogStore, AggregationStore, CapabilityStore, AlertStore, ViewStore,
-                      SystemStore, ConfigStore
+    ports.py          StreamCatalog + MessageStore (= LogStore), AggregationStore,
+                      CapabilityStore, AlertStore, ViewStore, SystemStore, ConfigStore
     policy.py         Limits, clamping, argument parsing
     service.py        LogService (search)
     analytics.py  alerts.py  saved_views.py  operations.py  configuration.py

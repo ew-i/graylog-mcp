@@ -37,8 +37,8 @@ from ..domain.operations import InputStatus, NodeStatus, NodeThroughput, SystemN
 from ..domain.views import SavedQuery
 
 
-class LogStore(Protocol):
-    """Message search and retrieval."""
+class StreamCatalog(Protocol):
+    """Cluster identity and the readable streams."""
 
     def cluster_info(self) -> ClusterInfo: ...
 
@@ -48,6 +48,10 @@ class LogStore(Protocol):
 
     def stream_exists(self, stream_id: str) -> bool: ...
 
+
+class MessageStore(Protocol):
+    """Message search and retrieval."""
+
     def search(self, query: LogQuery) -> SearchPage: ...
 
     def fetch(self, index: str, message_id: str) -> LogEntry: ...
@@ -55,6 +59,10 @@ class LogStore(Protocol):
     def field_types(self, stream_id: str, window: TimeWindow) -> list[FieldInfo]:
         """Indexed fields with their capabilities; UnsupportedError without the API."""
         ...
+
+
+class LogStore(StreamCatalog, MessageStore, Protocol):
+    """Both halves, for the search use case."""
 
 
 class CapabilityStore(Protocol):

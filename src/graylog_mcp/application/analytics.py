@@ -20,7 +20,7 @@ from ..domain.models import Between, JsonDict, LogEntry, LogQuery, Sort, SortDir
 from ..domain.timeutil import format_timestamp, parse_timestamp
 from .policy import Clock, Limits, clamp, parse_field_list, parse_percentiles
 from .policy import utc_now as _utc_now
-from .ports import AggregationStore, LogStore
+from .ports import AggregationStore, MessageStore
 
 
 def _lucene_phrase(value: Any) -> str:
@@ -54,7 +54,7 @@ def _scope_note(field: str, value: Any) -> str:
 class AnalyticsService:
     def __init__(
         self,
-        logs: LogStore,
+        logs: MessageStore,
         aggregations: AggregationStore,
         limits: Limits | None = None,
         clock: Clock = _utc_now,

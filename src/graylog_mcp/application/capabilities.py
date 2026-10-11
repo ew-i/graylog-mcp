@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from ..domain.capabilities import Capability
 from ..domain.models import JsonDict
-from .ports import CapabilityStore, LogStore
+from .ports import CapabilityStore, StreamCatalog
 
 # capability: (what it provides, what happens without it, tools that return Unsupported)
 _EFFECTS: dict[Capability, tuple[str, str, tuple[str, ...]]] = {
@@ -38,7 +38,7 @@ _EFFECTS: dict[Capability, tuple[str, str, tuple[str, ...]]] = {
 
 
 class CapabilityService:
-    def __init__(self, logs: LogStore, store: CapabilityStore) -> None:
+    def __init__(self, logs: StreamCatalog, store: CapabilityStore) -> None:
         self._logs = logs
         self._store = store
 
