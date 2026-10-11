@@ -3,6 +3,7 @@
 Not part of CI: it needs a live Graylog with a GELF HTTP input. It sends a small
 batch of fixture messages tagged with a run ID, waits until they are searchable,
 then drives the current code in-process through the MCP server, as a client would.
+The fixtures carry planted credentials; no tool or resource output may contain them.
 Tools marked 5.1+ must work on Graylog 5.1 and later and return `Unsupported` on
 older servers. Exit code 1 when any check fails.
 
@@ -39,6 +40,9 @@ ALL_MESSAGES = "000000000000000000000001"  # where a fresh server routes GELF me
 # 5.2 to 6.2 are untested, so (6, 0) is an assumption to confirm.
 TIME_GROUPING_SINCE = (6, 0)
 ERRORS = "level:3"
+REDACTED = "[REDACTED]"
+PLACEHOLDER = re.compile(r"\[REDACTED-\d+\]")
+SESSIONS = 3  # fixture messages are spread evenly over this many session IDs
 
 Check = Callable[[], str]  # returns a detail line; raises AssertionError on failure
 
@@ -60,12 +64,30 @@ class Run:
         self.query = f"live_check:{self.run_id}"
         self.version: tuple[int, int] = (0, 0)
         self.sent = 0
+        self.password = f"pw-{self.run_id}-hunter2"
+        self.db_password = f"db-{self.run_id}-s3cr3t"
+        self.bearer = f"bearer{self.run_id}abcdefghijklmnop"
+        self.github = f"ghp_{self.run_id}abcdefghijklmnop"
+        self.sessions = [f"{self.run_id}-session-{n}" for n in range(SESSIONS)]
+        self.planted = {
+            self.password,
+            self.db_password,
+            self.bearer,
+            self.github,
+            *self.sessions,
+        }
 
     # -- MCP calls -----------------------------------------------------------
 
     def tool(self, name: str, **arguments: Any) -> dict:
         result = asyncio.run(self.server.call_tool(name, arguments))
-        return json.loads(result.content[0].text)
+        text = result.content[0].text
+        self.assert_redacted(name, text)
+        return json.loads(text)
+
+    def assert_redacted(self, source: str, text: str) -> None:
+        leaked = sorted(secret for secret in self.planted if secret in text)
+        assert not leaked, f"{source} leaked planted credentials {leaked}"
 
     def ok(self, name: str, **arguments: Any) -> dict:
         body = self.tool(name, **arguments)
@@ -101,6 +123,14 @@ class Run:
                 "_request_id": f"{self.run_id}-{i}",
                 "_live_check": self.run_id,
                 **({"_error_type": error_type} if error_type else {}),
+                # Planted credentials: redaction must hide them in every output.
+                "_password": self.password,
+                "_session_id": self.sessions[i % SESSIONS],
+                "_token_count": i,
+                "_detail": (
+                    f"login password={self.password} via postgres://app:{self.db_password}@db/x "
+                    f"with Authorization: Bearer {self.bearer} and {self.github}"
+                ),
             }
             request = urllib.request.Request(
                 self.gelf_url, json.dumps(body).encode(), {"Content-Type": "application/json"}
@@ -151,6 +181,73 @@ class Run:
             )
             assert body["anchor"].get("_id") == m["_id"]
             return f"{len(body['before'])} before, {len(body['after'])} after"
+
+        def redacted_search() -> str:
+            body = self.ok("find_recent_logs", query=q, stream_id=s, range_seconds=3600, limit=1)
+            [m] = body["messages"]
+            assert (m.get("password"), m.get("session_id")) == (REDACTED, REDACTED), m
+            assert m.get("token_count") not in (None, REDACTED), m
+            assert m["detail"].count(REDACTED) == 4, m["detail"]
+            return "credential fields and text redacted; token_count kept"
+
+        def masked_rank() -> str:
+            body = self.ok(
+                "rank_field_values", query=q, field="session_id", stream_id=s, range_seconds=3600
+            )
+            counts = {v["value"]: v["count"] for v in body["top_values"]}
+            assert all(PLACEHOLDER.fullmatch(v) for v in counts), counts
+            assert sorted(counts.values()) == [self.sent // SESSIONS] * SESSIONS, counts
+            return f"{len(counts)} session IDs masked, counts kept"
+
+        def masked_exact() -> str:
+            body = self.scripting(
+                "exact_field_counts", query=q, field="session_id", stream_id=s, range_seconds=3600
+            )
+            if body is None:
+                return "Unsupported (pre-5.1)"
+            counts = {v["value"]: v["count"] for v in body["top_values"]}
+            assert all(PLACEHOLDER.fullmatch(v) for v in counts), counts
+            assert sorted(counts.values()) == [self.sent // SESSIONS] * SESSIONS, counts
+            return f"{len(counts)} session IDs masked, counts kept"
+
+        def masked_context() -> str:
+            m = found["error"]
+            body = self.ok(
+                "message_context",
+                index=m["_index"],
+                message_id=m["_id"],
+                stream_id=s,
+                context_field="session_id",
+                window_seconds=3600,
+            )
+            assert body["context_value"] == REDACTED, body["context_value"]
+            neighbours = len(body["before"]) + len(body["after"])
+            assert neighbours == self.sent // SESSIONS - 1, body
+            return f"context value redacted; {neighbours} neighbours share the session"
+
+        def graylog_data_redactions() -> str:
+            """Reports, without failing, where Graylog's own data was redacted, since a
+            real server may hold credentials; on a throwaway stack expect none."""
+            calls = {
+                "cluster_status": {},
+                "server_capabilities": {},
+                "browse_streams": {},
+                "stream_rules": {"stream_id": s},
+                "pipeline_rules": {},
+                "index_sets": {},
+                "lookup_tables": {},
+                "alert_definitions": {},
+                "input_status": {},
+                "throughput": {},
+                "system_notifications": {},
+                "cluster_nodes": {},
+            }
+            hits = {}
+            for name, arguments in calls.items():
+                text = json.dumps(self.ok(name, **arguments))
+                if REDACTED in text:
+                    hits[name] = text.count(REDACTED)
+            return f"redacted: {hits}" if hits else "nothing redacted"
 
         def fields() -> str:
             body = self.ok("discover_fields", stream_id=s, range_seconds=3600)
@@ -290,6 +387,7 @@ class Run:
             uris.append(f"graylog://streams/{s}/fields")
             for uri in uris:
                 [content] = asyncio.run(self.server.read_resource(uri))
+                self.assert_redacted(uri, str(content.content))
                 if content.mime_type == "application/json":
                     body = json.loads(content.content)
                     assert "error" not in body, f"{uri}: {body}"
@@ -366,6 +464,11 @@ class Run:
             ("find_logs_between", between),
             ("read_log_message", read_message),
             ("message_context", context),
+            ("redacted search results", redacted_search),
+            ("rank_field_values masks session_id", masked_rank),
+            ("exact_field_counts masks (5.1+)", masked_exact),
+            ("message_context redacts context", masked_context),
+            ("Graylog data redactions", graylog_data_redactions),
             ("discover_fields", fields),
             ("discover_fields unknown stream", unknown_stream),
             ("count_matches", count),

@@ -17,7 +17,7 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.policy import Limits
 from .query_guide import QUERY_SYNTAX
-from .responses import respond
+from .responses import Responder
 
 if TYPE_CHECKING:
     from .mcp_tools import ServiceBundle
@@ -59,7 +59,12 @@ class TtlCache:
         return value
 
 
-def register(server: MCPServer, services: ServiceBundle, cache: TtlCache | None = None) -> None:
+def register(
+    server: MCPServer,
+    services: ServiceBundle,
+    respond: Responder,
+    cache: TtlCache | None = None,
+) -> None:
     cache = cache or TtlCache(CACHE_SECONDS)
     freshness = f"Cached for up to {cache.ttl:g} s." if cache.ttl > 0 else "Not cached."
     catalogue: dict[str, tuple[str, str, Callable[[], Any]]] = {
@@ -101,7 +106,7 @@ def register(server: MCPServer, services: ServiceBundle, cache: TtlCache | None 
         ),
     }
     for uri, (name, description, load) in catalogue.items():
-        _add(server, cache, uri, name, f"{description} {freshness}", load)
+        _add(server, respond, cache, uri, name, f"{description} {freshness}", load)
 
     @server.resource(
         "graylog://streams/{stream_id}/fields",
@@ -135,6 +140,7 @@ def register(server: MCPServer, services: ServiceBundle, cache: TtlCache | None 
 
 def _add(
     server: MCPServer,
+    respond: Responder,
     cache: TtlCache,
     uri: str,
     name: str,

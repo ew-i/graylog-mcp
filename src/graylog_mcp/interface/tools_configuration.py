@@ -5,10 +5,10 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from ..application.configuration import ConfigurationService
-from .responses import respond
+from .responses import Responder
 
 
-def register(server: MCPServer, service: ConfigurationService) -> None:
+def register(server: MCPServer, service: ConfigurationService, respond: Responder) -> None:
     @server.tool()
     def stream_rules(stream_id: str) -> str:
         """Which messages a stream receives: its routing rules, in plain words.
@@ -63,4 +63,4 @@ def register(server: MCPServer, service: ConfigurationService) -> None:
             table: Lookup table name (from lookup_tables).
             key: Key to resolve.
         """
-        return respond(lambda: service.lookup_value(table=table, key=key))
+        return respond(lambda: service.lookup_value(table=table, key=key), fields=(table,))

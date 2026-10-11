@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     )
     allowed_hosts: str = Field("", validation_alias="MCP_ALLOWED_HOSTS")
     allowed_origins: str = Field("", validation_alias="MCP_ALLOWED_ORIGINS")
+    redact_fields: str = Field("", validation_alias="MCP_REDACT_FIELDS")
     resource_cache_seconds: float = Field(
         60.0, ge=0, validation_alias="MCP_RESOURCE_CACHE_SECONDS"
     )
@@ -63,6 +64,7 @@ class Settings(BaseSettings):
         "streamable_http_path",
         "allowed_hosts",
         "allowed_origins",
+        "redact_fields",
         mode="before",
     )
     @classmethod
@@ -120,6 +122,9 @@ class Settings(BaseSettings):
             allowed_hosts=_split_csv(self.allowed_hosts),
             allowed_origins=_split_csv(self.allowed_origins),
         )
+
+    def redact_field_names(self) -> list[str]:
+        return _split_csv(self.redact_fields)
 
 
 def _split_csv(value: str) -> list[str]:

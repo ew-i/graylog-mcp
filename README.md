@@ -160,9 +160,27 @@ tests/              domain, services (with fakes), adapters (MockTransport), MCP
 | `MCP_ALLOWED_ORIGINS`                 | no       | empty                     |
 | `MCP_RESOURCE_CACHE_SECONDS`          | no       | `60`                      |
 
-MCP responses redact built-in credential fields and common credential patterns.
+MCP responses redact credentials before they leave the server:
+
+- Values under sensitive key names, such as any key containing `password`,
+  `secret`, `token` or `api_key`, or ending in `auth`, `session` or `cookie`.
+  Keys that only describe a secret (`token_count`, `token_type`) and
+  true/false or null values are kept.
+- Credential patterns in text: labelled values (`password=…`,
+  `"token": "…"`, `Authorization: …`), passwords in URLs of any scheme,
+  bearer tokens, JWTs, private keys, webhook URLs, Azure keys and SAS
+  signatures, and well-known token formats (AWS, GitHub, GitLab, Slack,
+  Google, Stripe, OpenAI/Anthropic, npm, PyPI).
+- The configured `GRAYLOG_API_TOKEN`, wherever its exact value appears.
+- Values of a sensitive field that a tool reports on, such as
+  `rank_field_values` on `session_id`, become numbered placeholders
+  (`[REDACTED-1]`), so counts and repeats stay visible.
+
 Add application-specific field names as a comma-separated list with
-`MCP_REDACT_FIELDS`; built-in redaction rules cannot be disabled.
+`MCP_REDACT_FIELDS`; they match key names exactly, ignoring case and
+punctuation. Built-in redaction rules cannot be disabled. Redaction does not
+stop a client from narrowing a secret with repeated searches such as
+`password:a*`; restrict the token's stream permissions for that.
 
 `MCP_ALLOWED_HOSTS` and `MCP_ALLOWED_ORIGINS` are comma-separated. When
 DNS-rebinding protection is enabled, every HTTP client must use an allowed
@@ -192,6 +210,7 @@ the MCP SDK's `:*` port wildcard, such as `localhost:*` or
 | `--enable-dns-rebinding-protection` / `--no-enable-dns-rebinding-protection` | Validate HTTP `Host` and `Origin` headers                         |
 | `--allowed-hosts`                                                            | Comma-separated allowed HTTP `Host` values                        |
 | `--allowed-origins`                                                          | Comma-separated allowed HTTP `Origin` values                      |
+| `--redact-fields`                                                            | Comma-separated extra field names whose values are redacted       |
 | `--resource-cache-seconds`                                                   | Seconds MCP resource reads are cached; `0` disables caching       |
 
 Settings are also read from `.env`. Precedence is CLI

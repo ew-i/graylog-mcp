@@ -212,6 +212,19 @@ class McpToolsTest(unittest.TestCase):
         # Then
         self.assertEqual(result["top_values"], [{"value": "a", "count": 1}])
 
+    def test_given_a_sensitive_field_when_ranking_its_values_then_masks_each_value(self):
+        # Given
+        self.logs.entries = [{"session_id": "s-a"}, {"session_id": "s-a"}, {"session_id": "s-b"}]
+
+        # When
+        result = self.call("rank_field_values", query="*", field="session_id", stream_id="s1")
+
+        # Then
+        self.assertEqual(
+            result["top_values"],
+            [{"value": "[REDACTED-1]", "count": 2}, {"value": "[REDACTED-2]", "count": 1}],
+        )
+
     def test_given_server_side_counts_when_counting_exactly_then_returns_the_counts(self):
         # Given
         self.agg.tables = [AggregationTable((AggregationRow(("a",), {"count": 42}),))]

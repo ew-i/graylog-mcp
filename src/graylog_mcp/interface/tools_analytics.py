@@ -5,10 +5,10 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from ..application.analytics import AnalyticsService
-from .responses import respond
+from .responses import Responder
 
 
-def register(server: MCPServer, service: AnalyticsService) -> None:
+def register(server: MCPServer, service: AnalyticsService, respond: Responder) -> None:
     @server.tool()
     def count_matches(query: str, stream_id: str, range_seconds: int = 3600) -> str:
         """Count messages matching a query without returning them. Cheap first check
@@ -52,7 +52,8 @@ def register(server: MCPServer, service: AnalyticsService) -> None:
                 interval=interval,
                 split_by=split_by,
                 split_limit=split_limit,
-            )
+            ),
+            fields=(split_by,),
         )
 
     @server.tool()
@@ -73,7 +74,8 @@ def register(server: MCPServer, service: AnalyticsService) -> None:
         return respond(
             lambda: service.exact_field_counts(
                 text=query, stream_id=stream_id, field=field, seconds=range_seconds, top=top_n
-            )
+            ),
+            fields=(field,),
         )
 
     @server.tool()
@@ -107,7 +109,8 @@ def register(server: MCPServer, service: AnalyticsService) -> None:
                 baseline_offset_seconds=baseline_offset_seconds,
                 field=field,
                 top=top_n,
-            )
+            ),
+            fields=(field,),
         )
 
     @server.tool()
@@ -142,7 +145,8 @@ def register(server: MCPServer, service: AnalyticsService) -> None:
                 percentiles=percentiles,
                 group_by=group_by,
                 group_limit=group_limit,
-            )
+            ),
+            fields=(group_by,),
         )
 
     @server.tool()

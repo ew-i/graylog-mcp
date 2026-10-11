@@ -5,10 +5,10 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from ..application.alerts import AlertService
-from .responses import respond
+from .responses import Responder
 
 
-def register(server: MCPServer, service: AlertService) -> None:
+def register(server: MCPServer, service: AlertService, respond: Responder) -> None:
     @server.tool()
     def recent_alerts(
         range_seconds: int = 86400,

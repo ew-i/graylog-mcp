@@ -5,10 +5,10 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from ..application.capabilities import CapabilityService
-from .responses import respond
+from .responses import Responder
 
 
-def register(server: MCPServer, service: CapabilityService) -> None:
+def register(server: MCPServer, service: CapabilityService, respond: Responder) -> None:
     @server.tool()
     def server_capabilities() -> str:
         """Graylog version and which optional APIs it offers (server-side aggregation,

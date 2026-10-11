@@ -5,15 +5,15 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from ..application.service import LogService
-from .responses import respond as _respond
+from .responses import Responder
 
 
-def register(server: MCPServer, service: LogService) -> None:
+def register(server: MCPServer, service: LogService, respond: Responder) -> None:
     @server.tool()
     def cluster_status() -> str:
         """Report Graylog version, node/cluster identity, hostname, timezone and
         whether message processing is running."""
-        return _respond(service.cluster_info)
+        return respond(service.cluster_info)
 
     @server.tool()
     def browse_streams(limit: int = 50, next_cursor: str = "") -> str:
@@ -26,7 +26,7 @@ def register(server: MCPServer, service: LogService) -> None:
             limit: Maximum streams returned (1-200).
             next_cursor: A previous response's next_cursor. Continues that exact request:
                 filters, time range and page size come from the cursor."""
-        return _respond(lambda: service.streams(limit=limit, next_cursor=next_cursor))
+        return respond(lambda: service.streams(limit=limit, next_cursor=next_cursor))
 
     @server.tool()
     def find_recent_logs(
@@ -56,7 +56,7 @@ def register(server: MCPServer, service: LogService) -> None:
             next_cursor: A previous response's next_cursor. Continues that exact request:
                 filters, time range and page size come from the cursor.
         """
-        return _respond(
+        return respond(
             lambda: service.search_recent(
                 text=query,
                 stream_id=stream_id,
@@ -98,7 +98,7 @@ def register(server: MCPServer, service: LogService) -> None:
             next_cursor: A previous response's next_cursor. Continues that exact request:
                 filters, time range and page size come from the cursor.
         """
-        return _respond(
+        return respond(
             lambda: service.search_between(
                 text=query,
                 stream_id=stream_id,
@@ -121,7 +121,7 @@ def register(server: MCPServer, service: LogService) -> None:
             message_id: The message's _id.
             fields: Optional comma-separated field names to return.
         """
-        return _respond(lambda: service.message(index=index, message_id=message_id, fields=fields))
+        return respond(lambda: service.message(index=index, message_id=message_id, fields=fields))
 
     @server.tool()
     def rank_field_values(
@@ -145,10 +145,11 @@ def register(server: MCPServer, service: LogService) -> None:
             range_seconds: Look-back window (default 24 h).
             top_n: How many values to return (1-100).
         """
-        return _respond(
+        return respond(
             lambda: service.top_values(
                 text=query, stream_id=stream_id, field=field, seconds=range_seconds, top=top_n
-            )
+            ),
+            fields=(field,),
         )
 
     @server.tool()
@@ -165,6 +166,4 @@ def register(server: MCPServer, service: LogService) -> None:
             stream_id: Required. Access is enforced per stream; get IDs from browse_streams.
             range_seconds: Look-back window (default 1 h).
         """
-        return _respond(
-            lambda: service.discover_fields(stream_id=stream_id, seconds=range_seconds)
-        )
+        return respond(lambda: service.discover_fields(stream_id=stream_id, seconds=range_seconds))

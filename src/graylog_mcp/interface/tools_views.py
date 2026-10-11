@@ -5,10 +5,10 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from ..application.saved_views import SavedViewService
-from .responses import respond
+from .responses import Responder
 
 
-def register(server: MCPServer, service: SavedViewService) -> None:
+def register(server: MCPServer, service: SavedViewService, respond: Responder) -> None:
     @server.tool()
     def saved_searches(query: str = "", limit: int = 50, next_cursor: str = "") -> str:
         """List saved searches, so you can reuse queries your team already relies on.

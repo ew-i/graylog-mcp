@@ -17,6 +17,8 @@ from graylog_mcp.domain.models import Stream
 from graylog_mcp.domain.views import ViewSummary
 from graylog_mcp.interface import resources
 from graylog_mcp.interface.mcp_tools import ServiceBundle, build_server
+from graylog_mcp.interface.redaction import Redactor
+from graylog_mcp.interface.responses import Responder
 
 from .fakes import (
     FakeAggregationStore,
@@ -49,6 +51,9 @@ def read(server: MCPServer, uri: str) -> dict:
 
 def listed(server: MCPServer) -> dict:
     return {str(r.uri): r for r in asyncio.run(server.list_resources())}
+
+
+RESPOND = Responder(Redactor())
 
 
 class ResourceCatalogueTest(unittest.TestCase):
@@ -129,7 +134,7 @@ class ResourceCacheTest(unittest.TestCase):
         self.now = 0.0
         self.services = ServiceBundle(*(Mock() for _ in range(7)))
         self.server = MCPServer("test")
-        resources.register(self.server, self.services, resources.TtlCache(60, clock=lambda: self.now))
+        resources.register(self.server, self.services, RESPOND, resources.TtlCache(60, clock=lambda: self.now))
 
     def test_given_cached_read_when_reading_again_then_reuses_it_until_the_ttl_expires(self):
         # Given
@@ -194,7 +199,7 @@ class ResourceCacheTest(unittest.TestCase):
     def test_given_zero_seconds_when_reading_twice_then_nothing_is_cached(self):
         # Given
         server = MCPServer("test")
-        resources.register(server, self.services, resources.TtlCache(0, clock=lambda: 0.0))
+        resources.register(server, self.services, RESPOND, resources.TtlCache(0, clock=lambda: 0.0))
         self.services.search.cluster_info.side_effect = [{"version": "1"}, {"version": "2"}]
 
         # When / Then

@@ -26,6 +26,7 @@ from .infrastructure.graylog_http import GraylogStore
 from .infrastructure.graylog_system import GraylogSystemStore
 from .infrastructure.graylog_views import GraylogViewStore
 from .interface.mcp_tools import ServiceBundle, build_server
+from .interface.redaction import Redactor
 from .interface.resources import CACHE_SECONDS
 
 
@@ -107,6 +108,10 @@ def parse_args(argv: Sequence[str] | None = None) -> Settings:
         help="Comma-separated Origin header values allowed for HTTP transports",
     )
     parser.add_argument(
+        "--redact-fields",
+        help="Comma-separated extra field names whose values are redacted",
+    )
+    parser.add_argument(
         "--resource-cache-seconds",
         type=float,
         help="How long MCP resource reads are cached; 0 disables caching",
@@ -129,6 +134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             wire(http, settings.resource_cache_seconds),
             log_level=settings.log_level,
             resource_cache_seconds=settings.resource_cache_seconds,
+            redactor=Redactor(settings.redact_field_names(), secrets=(settings.api_token,)),
         )
         if settings.transport == "streamable-http":
             server.run(

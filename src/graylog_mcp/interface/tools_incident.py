@@ -5,10 +5,10 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from ..application.incident import IncidentService
-from .responses import respond
+from .responses import Responder
 
 
-def register(server: MCPServer, service: IncidentService) -> None:
+def register(server: MCPServer, service: IncidentService, respond: Responder) -> None:
     @server.tool()
     def investigate_incident(
         query: str,

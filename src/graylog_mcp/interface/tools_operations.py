@@ -5,10 +5,10 @@ from __future__ import annotations
 from mcp.server.mcpserver import MCPServer
 
 from ..application.operations import OperationsService
-from .responses import respond
+from .responses import Responder
 
 
-def register(server: MCPServer, service: OperationsService) -> None:
+def register(server: MCPServer, service: OperationsService, respond: Responder) -> None:
     @server.tool()
     def input_status(only_problems: bool = False) -> str:
         """Each log input and whether it is running on every node. Failed or stopped

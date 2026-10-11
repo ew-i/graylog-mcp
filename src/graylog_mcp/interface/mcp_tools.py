@@ -21,6 +21,7 @@ from ..application.saved_views import SavedViewService
 from ..application.service import LogService
 from . import (
     prompts,
+    redaction,
     resources,
     tools_alerts,
     tools_analytics,
@@ -31,6 +32,7 @@ from . import (
     tools_search,
     tools_views,
 )
+from .responses import Responder
 
 
 @dataclass(frozen=True)
@@ -58,16 +60,18 @@ def build_server(
     name: str = "graylog",
     log_level: LogLevel = "INFO",
     resource_cache_seconds: float = resources.CACHE_SECONDS,
+    redactor: redaction.Redactor | None = None,
 ) -> MCPServer:
     server = MCPServer(name, instructions=INSTRUCTIONS, log_level=log_level)
-    tools_search.register(server, services.search)
-    tools_analytics.register(server, services.analytics)
-    tools_alerts.register(server, services.alerts)
-    tools_views.register(server, services.views)
-    tools_operations.register(server, services.operations)
-    tools_configuration.register(server, services.configuration)
-    tools_capabilities.register(server, services.capabilities)
-    resources.register(server, services, resources.TtlCache(resource_cache_seconds))
+    respond = Responder(redactor or redaction.Redactor())
+    tools_search.register(server, services.search, respond)
+    tools_analytics.register(server, services.analytics, respond)
+    tools_alerts.register(server, services.alerts, respond)
+    tools_views.register(server, services.views, respond)
+    tools_operations.register(server, services.operations, respond)
+    tools_configuration.register(server, services.configuration, respond)
+    tools_capabilities.register(server, services.capabilities, respond)
+    resources.register(server, services, respond, resources.TtlCache(resource_cache_seconds))
     prompts.register(server)
     tools_incident.register(
         server,
@@ -78,5 +82,6 @@ def build_server(
             operations=services.operations,
             configuration=services.configuration,
         ),
+        respond,
     )
     return server

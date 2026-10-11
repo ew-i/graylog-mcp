@@ -257,6 +257,48 @@ class CompositionRootTest(unittest.TestCase):
         # Then
         self.assertEqual(settings.resource_cache_seconds, 0.0)
 
+    def test_given_redact_fields_in_environment_and_flag_when_parsing_then_flag_wins(self):
+        # Given
+        with patch.dict(
+            os.environ,
+            {
+                "GRAYLOG_BASE_URL": "https://gl.example",
+                "GRAYLOG_API_TOKEN": "token",
+                "MCP_REDACT_FIELDS": "employee_id",
+            },
+            clear=True,
+        ):
+            # When
+            settings = entry.parse_args(["--redact-fields", " badge_id, internal-note ,"])
+
+        # Then
+        self.assertEqual(settings.redact_field_names(), ["badge_id", "internal-note"])
+
+    def test_given_redact_fields_and_token_when_running_main_then_the_server_redacts_both(self):
+        # Given
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GRAYLOG_BASE_URL": "https://gl.example",
+                    "GRAYLOG_API_TOKEN": "graylog-token-value",
+                    "MCP_REDACT_FIELDS": "employee_id",
+                },
+                clear=True,
+            ),
+            patch.object(entry, "build_http_client", return_value=ClientContext()),
+            patch.object(entry, "build_server", return_value=FakeServer()) as build_server,
+        ):
+            # When
+            entry.main([])
+
+        # Then
+        redactor = build_server.call_args.kwargs["redactor"]
+        self.assertEqual(
+            redactor.redact({"employee_id": "e-1", "message": "sent graylog-token-value"}),
+            {"employee_id": "[REDACTED]", "message": "sent [REDACTED]"},
+        )
+
     def test_given_http_settings_when_running_main_then_streamable_http_server_starts(self):
         # Given
         server = FakeServer()
