@@ -20,34 +20,40 @@ from graylog_mcp.domain.timeutil import format_timestamp, parse_timestamp
 
 
 class IntervalTest(unittest.TestCase):
-    def test_interval_seconds(self):
+    def test_given_interval_texts_when_converting_then_returns_seconds(self):
+        # When / Then
         self.assertEqual(interval_seconds("5m"), 300)
         self.assertEqual(interval_seconds("2d"), 172800)
 
-    def test_bad_intervals(self):
+    def test_given_malformed_intervals_when_converting_then_rejects_each_interval(self):
         for bad in ("", "0m", "5x", "m5", "1.5h"):
+            # When / Then
             with self.subTest(bad=bad), self.assertRaises(InvalidRequestError):
                 interval_seconds(bad)
 
-    def test_auto_interval_respects_bucket_budget(self):
+    def test_given_range_and_bucket_budget_when_choosing_interval_then_respects_bucket_budget(self):
+        # When / Then
         self.assertEqual(auto_interval(3600, 60), "1m")
         self.assertEqual(auto_interval(86400, 48), "30m")
         self.assertEqual(auto_interval(30 * 86400, 48), "1d")
         self.assertEqual(auto_interval(10**12, 1), "1y")
 
-    def test_time_grouping_validates(self):
+    def test_given_malformed_interval_when_creating_time_grouping_then_rejects_the_interval(self):
+        # When / Then
         with self.assertRaises(InvalidRequestError):
             TimeGrouping("soon")
 
 
 class MetricTest(unittest.TestCase):
-    def test_labels(self):
+    def test_given_metrics_when_labelling_then_label_shows_function_field_and_percentile(self):
+        # When / Then
         self.assertEqual(Metric("count").label, "count")
         self.assertEqual(Metric("avg", "took_ms").label, "avg(took_ms)")
         self.assertEqual(Metric("percentile", "took_ms", percentile=90).label, "p90(took_ms)")
         self.assertEqual(Metric("percentile", "t", percentile=99.9).label, "p99.9(t)")
 
-    def test_validation(self):
+    def test_given_invalid_metric_or_grouping_when_creating_then_rejects_each_one(self):
+        # When / Then
         with self.assertRaises(InvalidRequestError):
             Metric("median", "x")
         with self.assertRaises(InvalidRequestError):
@@ -61,13 +67,15 @@ class MetricTest(unittest.TestCase):
         with self.assertRaises(InvalidRequestError):
             ValuesGrouping("x", 0)
 
-    def test_percentile_parser_rejects_invalid_values(self):
+    def test_given_percentile_lists_when_parsing_then_deduplicates_valid_and_rejects_invalid_values(self):
+        # When / Then
         self.assertEqual(parse_percentiles("50, 50, 99.9"), (50.0, 99.9))
         for raw in ("nope", "0", "101"):
             with self.subTest(raw=raw), self.assertRaises(InvalidRequestError):
                 parse_percentiles(raw)
 
-    def test_field_names_are_checked(self):
+    def test_given_field_names_when_checking_then_trims_names_and_rejects_query_syntax(self):
+        # When / Then
         self.assertEqual(require_field_name(" kubernetes.pod_name "), "kubernetes.pod_name")
         with self.assertRaises(InvalidRequestError):
             require_field_name('msg:"x" OR *')
@@ -76,8 +84,11 @@ class MetricTest(unittest.TestCase):
 
 
 class AggregationQueryTest(unittest.TestCase):
-    def test_requires_scope_and_distinct_metrics(self):
+    def test_given_missing_stream_or_metrics_when_creating_aggregation_then_rejects_the_aggregation(self):
+        # Given
         window = LastSeconds(60)
+
+        # When / Then
         with self.assertRaises(InvalidRequestError):
             AggregationQuery("*", "", window, (), (Metric("count"),))
         with self.assertRaises(InvalidRequestError):
@@ -87,49 +98,61 @@ class AggregationQueryTest(unittest.TestCase):
 
 
 class TimeUtilTest(unittest.TestCase):
-    def test_parse_variants(self):
+    def test_given_graylog_timestamp_variants_when_parsing_then_returns_the_same_utc_instant(self):
+        # Given
         expected = datetime(2026, 3, 15, 10, 0, 0, 123000, tzinfo=timezone.utc)
+
+        # When / Then
         self.assertEqual(parse_timestamp("2026-03-15T10:00:00.123Z"), expected)
         self.assertEqual(parse_timestamp("2026-03-15 10:00:00.123"), expected)
         self.assertEqual(parse_timestamp("2026-03-15T12:00:00.123+02:00"), expected)
 
-    def test_parse_rejects_garbage(self):
+    def test_given_non_timestamp_when_parsing_then_rejects_it(self):
+        # When / Then
         with self.assertRaises(InvalidRequestError):
             parse_timestamp("yesterday")
 
-    def test_format_round_trip(self):
+    def test_given_parsed_timestamp_when_formatting_then_returns_the_original_text(self):
+        # Given
+        parsed = parse_timestamp("2026-03-15T10:00:00.123Z")
+
+        # When
+        formatted = format_timestamp(parsed)
+
+        # Then
         self.assertEqual(
-            format_timestamp(parse_timestamp("2026-03-15T10:00:00.123Z")),
+            formatted,
             "2026-03-15T10:00:00.123Z",
         )
 
 
 class AlertModelTest(unittest.TestCase):
-    def test_priority_labels(self):
-        self.assertEqual(
-            [priority_label(p) for p in (1, 2, 3, 9, None)], ["low", "normal", "high", "9", None]
-        )
+    def test_given_priorities_when_labelling_then_returns_names_or_the_number(self):
+        # When
+        labels = [priority_label(p) for p in (1, 2, 3, 9, None)]
 
-    def test_event_query_limit(self):
+        # Then
+        self.assertEqual(labels, ["low", "normal", "high", "9", None])
+
+    def test_given_zero_limit_when_creating_event_query_then_rejects_the_query(self):
+        # When / Then
         with self.assertRaises(InvalidRequestError):
             EventQuery(window=LastSeconds(60), limit=0)
 
-    def test_event_query_offset(self):
+    def test_given_negative_offset_when_creating_event_query_then_rejects_the_query(self):
+        # When / Then
         with self.assertRaises(InvalidRequestError):
             EventQuery(window=LastSeconds(60), limit=1, offset=-1)
 
 
 class StreamRuleTest(unittest.TestCase):
     def rule(self, code, value="3", inverted=False, field="level"):
-        return StreamRule(
-            field=field, type_code=code, value=value, inverted=inverted, description=None
-        )
+        return StreamRule(field=field, type_code=code, value=value, inverted=inverted, description=None)
 
-    def test_meanings(self):
+    def test_given_rule_type_codes_when_explaining_then_explains_each_rule_in_plain_language(self):
+        # When / Then
         self.assertEqual(self.rule(1).meaning(), "level must match exactly '3'")
-        self.assertEqual(
-            self.rule(6, "err", inverted=True).meaning(), "level must not contain 'err'"
-        )
+        self.assertEqual(self.rule(6, "err", inverted=True).meaning(), "level must not contain 'err'")
         self.assertEqual(self.rule(5).meaning(), "level must be present")
         self.assertEqual(self.rule(7).meaning(), "every message matches")
         self.assertEqual(self.rule(8, "in1").meaning(), "input must be 'in1'")
@@ -138,16 +161,18 @@ class StreamRuleTest(unittest.TestCase):
 
 
 class HealthTest(unittest.TestCase):
-    def test_input_health(self):
+    def test_given_input_node_states_when_judging_health_then_reports_unknown_ok_or_problem(self):
+        # Given
         running = InputNodeState("n1", "RUNNING", None, None)
         failed = InputNodeState("n2", "FAILED", None, "port in use")
+
+        # When / Then
         self.assertEqual(InputStatus("i", "t", "gelf", True, None, ()).health, "unknown")
         self.assertEqual(InputStatus("i", "t", "gelf", True, None, (running,)).health, "ok")
-        self.assertEqual(
-            InputStatus("i", "t", "gelf", True, None, (running, failed)).health, "problem"
-        )
+        self.assertEqual(InputStatus("i", "t", "gelf", True, None, (running, failed)).health, "problem")
 
-    def test_node_health(self):
+    def test_given_node_states_when_judging_health_then_only_a_reachable_running_processing_node_is_healthy(self):
+        # When / Then
         self.assertTrue(NodeStatus("n", True, is_processing=True, lifecycle="running").healthy)
         self.assertFalse(NodeStatus("n", True, is_processing=False).healthy)
         self.assertFalse(NodeStatus("n", True, lifecycle="throttled").healthy)

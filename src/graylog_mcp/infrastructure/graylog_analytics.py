@@ -1,8 +1,11 @@
 """`AggregationStore` backed by Graylog's Search Scripting API (Graylog 5.1+).
 
 The API requires at least one grouping. For an ungrouped aggregation this adapter
-groups by the `streams` field and keeps the row for the queried stream: every
-matching message belongs to that stream, so that row covers all matches.
+groups by the `streams` field and keeps the queried stream's row. Every matching
+message belongs to that stream, so its row has the highest document count; any
+other stream with the same count holds the same messages. Rows are picked by that
+count because Graylog labels them with stream IDs on some versions (5.1) and
+stream titles on others (6.3).
 """
 
 from __future__ import annotations
@@ -19,14 +22,13 @@ from ..domain.aggregation import (
     TimeGrouping,
     ValuesGrouping,
 )
-from ..domain.errors import BackendError, InvalidRequestError, NotFoundError, UnsupportedError
+from ..domain.errors import BackendError, NotFoundError, UnsupportedError
 from .graylog_api import GraylogApi, timerange_json
 
 AGGREGATE_PATH = "/api/search/aggregate"
 _STREAM_GROUP_LIMIT = 100
-# How Graylog rejects grouping by (script_exception) or measuring (the text) a
-# full-text field such as `message`.
-_TEXT_FIELD_ERRORS = ("script_exception", "Text fields are not optimised")
+# How a Search Scripting API without time grouping (e.g. Graylog 5.1) rejects it.
+_NO_TIME_GROUPING = "Unable to map property timeunit"
 
 
 def _grouping_json(group) -> dict[str, Any]:
@@ -63,12 +65,20 @@ class GraylogAnalyticsStore:
             if synthetic
             else [_grouping_json(g) for g in query.groups]
         )
+        metrics = [_metric_json(m) for m in query.metrics]
+        doc_count = next(  # index of a plain document count, added when missing
+            (i for i, m in enumerate(query.metrics) if m.function == "count" and not m.field),
+            None,
+        )
+        if synthetic and doc_count is None:
+            doc_count = len(metrics)
+            metrics.append({"function": "count"})
         body = {
             "query": query.text,
             "streams": [query.stream_id],
             "timerange": timerange_json(query.window),
             "group_by": groups,
-            "metrics": [_metric_json(m) for m in query.metrics],
+            "metrics": metrics,
         }
         try:
             response = self._api.post_object(AGGREGATE_PATH, body)
@@ -77,30 +87,29 @@ class GraylogAnalyticsStore:
                 "server-side aggregation needs the Search Scripting API (Graylog 5.1 or newer)"
             ) from exc
         except BackendError as exc:
-            if not any(marker in str(exc) for marker in _TEXT_FIELD_ERRORS):
-                raise
-            fields = dict.fromkeys(
-                [g.field for g in query.groups if isinstance(g, ValuesGrouping)]
-                + [m.field for m in query.metrics if m.field]
-            )
-            raise InvalidRequestError(
-                f"Graylog could not aggregate {', '.join(fields)}. This usually means a "
-                "full-text field such as message, which cannot be grouped, counted per value "
-                "or measured; use a structured field (see discover_fields), or "
-                "rank_field_values to rank message texts."
-            ) from exc
+            if _NO_TIME_GROUPING in str(exc):
+                raise UnsupportedError(
+                    "this Graylog version's Search Scripting API cannot group by time "
+                    "(Graylog 5.1 cannot); count matches per window with count_matches instead"
+                ) from exc
+            raise
 
-        width = len(groups) + len(query.metrics)
+        width = len(groups) + len(metrics)
         labels = [m.label for m in query.metrics]
-        rows: list[AggregationRow] = []
+        rows: list[tuple[float, AggregationRow]] = []
         for raw in response.get("datarows") or []:
             if not isinstance(raw, list) or len(raw) != width:
                 raise BackendError("unexpected row shape in aggregation response")
             keys = tuple(_key(v) for v in raw[: len(groups)])
-            values = dict(zip(labels, raw[len(groups) :], strict=True))
+            cells = raw[len(groups) :]
+            values = dict(zip(labels, cells[: len(labels)], strict=True))
             if synthetic:
-                if keys[0] != query.stream_id:
-                    continue
-                keys = ()
-            rows.append(AggregationRow(keys=keys, values=values))
-        return AggregationTable(rows=tuple(rows))
+                count = cells[doc_count]
+                rows.append(
+                    (count if isinstance(count, (int, float)) else 0, AggregationRow((), values))
+                )
+            else:
+                rows.append((0, AggregationRow(keys=keys, values=values)))
+        if synthetic and rows:
+            return AggregationTable(rows=(max(rows, key=lambda pair: pair[0])[1],))
+        return AggregationTable(rows=tuple(row for _, row in rows))

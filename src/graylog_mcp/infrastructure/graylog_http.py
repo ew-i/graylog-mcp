@@ -7,16 +7,18 @@ from typing import Any
 
 import httpx
 
-from ..domain.errors import NotFoundError
+from ..domain.errors import NotFoundError, UnsupportedError
 from ..domain.models import (
     Between,
     ClusterInfo,
+    FieldInfo,
     LastSeconds,
     ListingPage,
     LogEntry,
     LogQuery,
     SearchPage,
     Stream,
+    TimeWindow,
 )
 from .graylog_api import (
     GraylogApi,
@@ -25,6 +27,8 @@ from .graylog_api import (
     objects,
     page_number,
     segment,
+    text,
+    timerange_json,
     total_count,
 )
 
@@ -142,6 +146,30 @@ class GraylogStore:
             ),
             index=index,
         )
+
+    def field_types(self, stream_id: str, window: TimeWindow) -> list[FieldInfo]:
+        try:
+            items = self._api.post_list(
+                "/api/views/fields",
+                {"streams": [stream_id], "timerange": timerange_json(window)},
+            )
+        except NotFoundError as exc:
+            raise UnsupportedError("this Graylog server has no field-types API") from exc
+        fields = []
+        for item in objects(items):
+            kind = item.get("type") if isinstance(item.get("type"), dict) else {}
+            properties = kind.get("properties")
+            properties = properties if isinstance(properties, list) else []
+            if item.get("name"):
+                fields.append(
+                    FieldInfo(
+                        name=str(item["name"]),
+                        type=text(kind.get("type")),
+                        groupable="enumerable" in properties,
+                        numeric="numeric" in properties,
+                    )
+                )
+        return fields
 
     @staticmethod
     def _search_params(query: LogQuery) -> dict[str, Any]:

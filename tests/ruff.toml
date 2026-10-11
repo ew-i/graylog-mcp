@@ -1,0 +1,9 @@
+# Tests extend the project settings without the 99-character limit: BDD test names
+# spell out the whole scenario (given, when, then). The formatter wraps at 130.
+extend = "../pyproject.toml"
+line-length = 130
+
+[lint]
+# E501: long test names are intended. SIM108: at 130 characters a ternary would fit
+# where a commented if/else reads better.
+ignore = ["E501", "SIM108"]

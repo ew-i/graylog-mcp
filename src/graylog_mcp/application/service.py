@@ -10,15 +10,16 @@ from dataclasses import asdict
 from typing import Any
 
 from ..domain.analysis import field_names, rank_values
-from ..domain.errors import InvalidRequestError, NotFoundError
+from ..domain.errors import InvalidRequestError, NotFoundError, UnsupportedError
 from ..domain.models import (
     Between,
+    FieldInfo,
     JsonDict,
-    LastSeconds,
     LogQuery,
     Sort,
     SortDirection,
     TimeWindow,
+    is_internal_field,
 )
 from .pagination import open_page, page_metadata, pinned_window
 from .policy import Clock, Limits, parse_field_list, utc_now
@@ -65,7 +66,7 @@ class LogService:
         sort_order: str = "desc",
         next_cursor: str = "",
     ) -> JsonDict:
-        window = LastSeconds(_clamp(seconds, 1, self._limits.max_window_seconds))
+        window = self._limits.recent_window(seconds)
         return self._search(
             window, text, stream_id, limit, fields, sort_field, sort_order, next_cursor
         )
@@ -162,7 +163,7 @@ class LogService:
         if not field:
             raise InvalidRequestError("field must not be blank")
 
-        window = LastSeconds(_clamp(seconds, 1, self._limits.max_window_seconds))
+        window = self._limits.recent_window(seconds)
         sample = self._limits.aggregation_sample
         page = self._store.search(
             LogQuery(
@@ -190,7 +191,7 @@ class LogService:
         return result
 
     def discover_fields(self, *, stream_id: str, seconds: int) -> JsonDict:
-        window = LastSeconds(_clamp(seconds, 1, self._limits.max_window_seconds))
+        window = self._limits.recent_window(seconds)
         query = LogQuery(
             text="*",
             stream_id=stream_id.strip(),
@@ -203,12 +204,32 @@ class LogService:
                 f"stream {query.stream_id!r} does not exist or this token cannot read it; "
                 "call browse_streams to find one"
             )
+        # Field types give capabilities but lag behind new fields (Graylog refreshes them
+        # periodically); the sample of recent messages catches fields not typed yet.
         page = self._store.search(query)
-        names = field_names(page.entries)
-        return {
+        try:
+            typed = {
+                f.name: f
+                for f in self._store.field_types(query.stream_id, window)
+                if not is_internal_field(f.name)
+            }
+            source = "field types"
+        except UnsupportedError:  # older servers: names from the sample only
+            typed, source = {}, "message sample"
+        untyped = [name for name in field_names(page.entries) if name not in typed]
+        fields = [*typed.values(), *(FieldInfo(name, None, None, None) for name in untyped)]
+        fields.sort(key=lambda f: f.name)
+        result: JsonDict = {
             "stream_id": query.stream_id,
             "window": window.describe(),
+            "source": source,
             "sampled_messages": len(page.entries),
-            "count": len(names),
-            "fields": names,
+            "count": len(fields),
+            "fields": [asdict(f) for f in fields],
         }
+        if typed and untyped:
+            result["note"] = (
+                f"{', '.join(untyped)} appear in recent messages but have no type yet; "
+                "Graylog refreshes field types periodically, so check again shortly."
+            )
+        return result

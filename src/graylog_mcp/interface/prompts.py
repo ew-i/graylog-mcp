@@ -15,9 +15,9 @@ from .query_guide import QUERY_SYNTAX
 
 _RULES = (
     "Rules: the tools are read-only. Do not guess field names; check them with "
-    "`discover_fields`. Group and compare by structured fields such as an error type; "
-    "the full-text message field cannot be grouped on the server, so rank message texts "
-    "with `rank_field_values` instead. A result of {kind: ...} is an error to explain, "
+    "`discover_fields`. Group and compare only by fields it marks groupable, such as an "
+    "error type; the full-text message field is not, so rank message texts with "
+    "`rank_field_values` instead. A result of {kind: ...} is an error to explain, "
     "not data. "
     "Cite counts, times and message IDs as evidence, and say what you could not verify."
 )

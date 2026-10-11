@@ -1,0 +1,37 @@
+# Throwaway Graylog stack for scripts/live_check.py. Start it with
+# `python scripts/live/stack.py up 5.1`; versions and ports come from stack.py.
+name: graylog-live-${GRAYLOG_SLUG}
+
+services:
+  mongodb:
+    image: mongo:${MONGO_VERSION}
+    restart: "no"
+
+  opensearch:
+    image: opensearchproject/opensearch:${OPENSEARCH_VERSION}
+    restart: "no"
+    environment:
+      discovery.type: single-node
+      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+      DISABLE_SECURITY_PLUGIN: "true"
+      DISABLE_INSTALL_DEMO_CONFIG: "true"
+      action.auto_create_index: "false"
+      bootstrap.memory_lock: "false"
+
+  graylog:
+    image: graylog/graylog:${GRAYLOG_VERSION}
+    restart: "no"
+    depends_on: [mongodb, opensearch]
+    entrypoint: /usr/bin/tini -- wait-for-it opensearch:9200 -- /docker-entrypoint.sh
+    environment:
+      GRAYLOG_NODE_ID_FILE: /usr/share/graylog/data/node-id
+      GRAYLOG_PASSWORD_SECRET: live-check-password-secret-0123456789
+      GRAYLOG_ROOT_PASSWORD_SHA2: 8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918
+      GRAYLOG_HTTP_BIND_ADDRESS: 0.0.0.0:9000
+      GRAYLOG_HTTP_EXTERNAL_URI: http://localhost:${WEB_PORT}/
+      GRAYLOG_ELASTICSEARCH_HOSTS: http://opensearch:9200
+      GRAYLOG_MONGODB_URI: mongodb://mongodb:27017/graylog
+      GRAYLOG_SERVER_JAVA_OPTS: -Xms512m -Xmx512m
+    ports:
+      - 127.0.0.1:${WEB_PORT}:9000
+      - 127.0.0.1:${GELF_PORT}:12201

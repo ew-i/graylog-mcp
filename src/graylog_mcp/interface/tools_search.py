@@ -153,13 +153,17 @@ def register(server: MCPServer, service: LogService) -> None:
 
     @server.tool()
     def discover_fields(stream_id: str, range_seconds: int = 3600) -> str:
-        """List field names present in recent messages of a stream, to learn
-        what can be searched or aggregated. Graylog's internal fields (gl2_*,
-        _id, streams) are left out; an unknown stream returns NotFound.
+        """List a stream's fields with their type and whether each is groupable
+        (usable by exact_field_counts, compare_windows, group_by) or numeric
+        (usable by field_stats). Full-text fields such as message are neither.
+        Graylog's internal fields (gl2_*, _id, streams) are left out; an unknown
+        stream returns NotFound. Fields seen in recent messages that Graylog has
+        not typed yet (or every field, on servers without the field-types API)
+        have type and capabilities null.
 
         Args:
             stream_id: Required. Access is enforced per stream; get IDs from browse_streams.
-            range_seconds: Look-back window used for sampling (default 1 h).
+            range_seconds: Look-back window (default 1 h).
         """
         return _respond(
             lambda: service.discover_fields(stream_id=stream_id, seconds=range_seconds)

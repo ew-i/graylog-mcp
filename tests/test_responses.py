@@ -15,21 +15,34 @@ def fail(exc):
 
 
 class ResponseErrorTest(unittest.TestCase):
-    def test_expected_error_keeps_its_kind_without_logging(self):
+    def test_given_expected_error_when_responding_then_keeps_the_kind_and_logs_nothing(self):
+        # Given
+        action = fail(NotFoundError("no such stream"))
+
+        # When
         with self.assertNoLogs("graylog_mcp.interface.responses"):
-            result = json.loads(respond(fail(NotFoundError("no such stream"))))
+            result = json.loads(respond(action))
+
+        # Then
         self.assertEqual(result, {"error": "no such stream", "kind": "NotFound"})
 
-    def test_unexpected_error_becomes_internal_payload_and_is_logged(self):
+    def test_given_unexpected_error_when_responding_then_logs_it_and_returns_a_redacted_internal_error(self):
+        # Given
+        action = fail(KeyError("password=hunter2"))
+
+        # When
         with self.assertLogs("graylog_mcp.interface.responses", level="ERROR"):
-            result = json.loads(respond(fail(KeyError("password=hunter2"))))
+            result = json.loads(respond(action))
+
+        # Then
         self.assertEqual(result["kind"], "Internal")
         self.assertTrue(result["error"].startswith("Unexpected KeyError: "))
         self.assertNotIn("hunter2", result["error"])
 
 
 class ResponseRedactionTest(unittest.TestCase):
-    def test_all_default_sensitive_field_names_are_redacted(self):
+    def test_given_default_sensitive_field_names_when_responding_then_redacts_their_values(self):
+        # Given
         sensitive_keys = (
             "accesskey",
             "apikey",
@@ -48,13 +61,16 @@ class ResponseRedactionTest(unittest.TestCase):
             "webhook",
         )
 
+        # When
         result = json.loads(respond(lambda: {key: f"value-for-{key}" for key in sensitive_keys}))
 
+        # Then
         for key in sensitive_keys:
             with self.subTest(key=key):
                 self.assertEqual(result[key], "[REDACTED]")
 
-    def test_redacts_each_supported_labeled_secret_pattern(self):
+    def test_given_labelled_secrets_in_text_when_responding_then_redacts_only_the_values(self):
+        # Given
         cases = (
             ("Authorization: Bearer bearer-value", "Authorization: Bearer [REDACTED]"),
             ("Authorization: Basic basic-value", "Authorization: Basic [REDACTED]"),
@@ -70,10 +86,14 @@ class ResponseRedactionTest(unittest.TestCase):
 
         for original, expected in cases:
             with self.subTest(original=original):
+                # When
                 result = json.loads(respond(lambda original=original: {"message": original}))
+
+                # Then
                 self.assertEqual(result["message"], expected)
 
-    def test_redacts_each_supported_known_token_prefix(self):
+    def test_given_known_token_prefixes_when_responding_then_redacts_the_tokens(self):
+        # Given
         tokens = (
             "AKIA1234567890123456",
             "github_pat_1234567890",
@@ -92,19 +112,20 @@ class ResponseRedactionTest(unittest.TestCase):
 
         for token in tokens:
             with self.subTest(token=token):
+                # When
                 result = json.loads(respond(lambda token=token: {"message": token}))
+
+                # Then
                 self.assertEqual(result["message"], "[REDACTED]")
 
-    def test_redacts_nested_fields_and_credential_patterns(self):
+    def test_given_nested_secrets_when_responding_then_redacts_them_at_every_depth(self):
+        # Given
         payload = {
             "password": "plain-secret",
             "events": [
                 {
                     "fields": {"session_token": "session-secret"},
-                    "message": (
-                        "api_key='inline-key' https://alice:password@example.test/path "
-                        "ghp_1234567890abcdefghijklmnop"
-                    ),
+                    "message": ("api_key='inline-key' https://alice:password@example.test/path ghp_1234567890abcdefghijklmnop"),
                 }
             ],
             "pipeline": "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY-----",
@@ -112,8 +133,10 @@ class ResponseRedactionTest(unittest.TestCase):
             "safe": "ordinary text",
         }
 
+        # When
         result = json.loads(respond(lambda: payload))
 
+        # Then
         self.assertEqual(result["password"], "[REDACTED]")
         self.assertEqual(result["events"][0]["fields"]["session_token"], "[REDACTED]")
         self.assertEqual(
@@ -124,12 +147,13 @@ class ResponseRedactionTest(unittest.TestCase):
         self.assertEqual(result["tuple"], ["Authorization: Basic [REDACTED]", "ordinary"])
         self.assertEqual(result["safe"], "ordinary text")
 
-    def test_custom_field_names_extend_built_in_redaction(self):
+    def test_given_custom_redact_fields_when_responding_then_they_are_redacted_too(self):
+        # Given
         with patch.dict(os.environ, {"MCP_REDACT_FIELDS": "employee_id, internal-note"}):
-            result = json.loads(
-                respond(lambda: {"employee_id": "e-123", "internal-note": "private"})
-            )
+            # When
+            result = json.loads(respond(lambda: {"employee_id": "e-123", "internal-note": "private"}))
 
+        # Then
         self.assertEqual(result, {"employee_id": "[REDACTED]", "internal-note": "[REDACTED]"})
 
 

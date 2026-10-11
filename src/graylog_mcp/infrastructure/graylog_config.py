@@ -18,6 +18,7 @@ from ..domain.configuration import (
     StreamConfig,
     StreamRule,
 )
+from ..domain.errors import NotFoundError
 from ..domain.models import ListingPage, ListingQuery
 from .graylog_api import (
     GraylogApi,
@@ -175,3 +176,10 @@ class GraylogConfigStore:
             has_error=bool(body.get("has_error", False)),
             ttl=integer(body.get("ttl")),
         )
+
+    def lookup_table_exists(self, table: str) -> bool:
+        try:
+            self._api.get_object(f"/api/system/lookup/tables/{segment(table)}")
+        except NotFoundError:
+            return False
+        return True

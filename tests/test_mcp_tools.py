@@ -10,6 +10,7 @@ from graylog_mcp.application.operations import OperationsService
 from graylog_mcp.application.saved_views import SavedViewService
 from graylog_mcp.application.service import LogService
 from graylog_mcp.domain.aggregation import AggregationRow, AggregationTable
+from graylog_mcp.domain.configuration import StreamConfig
 from graylog_mcp.domain.models import Stream
 from graylog_mcp.domain.operations import InputNodeState, InputStatus
 from graylog_mcp.interface.mcp_tools import ServiceBundle, build_server
@@ -21,6 +22,7 @@ from .fakes import (
     FakeLogStore,
     FakeSystemStore,
     FakeViewStore,
+    error_sections,
 )
 
 EXPECTED_TOOLS = {
@@ -100,7 +102,9 @@ class McpToolsTest(unittest.TestCase):
                 alerts=AlertService(FakeAlertStore()),
                 views=SavedViewService(FakeViewStore(), search),
                 operations=OperationsService(self.system),
-                configuration=ConfigurationService(FakeConfigStore()),
+                configuration=ConfigurationService(
+                    FakeConfigStore(streams={"s1": StreamConfig("s1", "api", None, "AND", False, None, ())})
+                ),
             )
         )
 
@@ -110,38 +114,60 @@ class McpToolsTest(unittest.TestCase):
     def tools(self):
         return {t.name: t for t in asyncio.run(self.server.list_tools())}
 
-    def test_registers_expected_tools(self):
-        self.assertEqual(set(self.tools()), EXPECTED_TOOLS)
+    def test_given_server_when_listing_tools_then_lists_expected_tools_with_default_log_level(self):
+        # When
+        tools = self.tools()
+
+        # Then
+        self.assertEqual(set(tools), EXPECTED_TOOLS)
         self.assertEqual(self.server.settings.log_level, "INFO")
 
-    def test_every_tool_is_documented(self):
-        for name, tool in self.tools().items():
+    def test_given_server_when_listing_tools_then_every_tool_is_documented(self):
+        # When
+        tools = self.tools()
+
+        # Then
+        for name, tool in tools.items():
             with self.subTest(tool=name):
                 self.assertTrue(tool.description and len(tool.description) > 20)
 
-    def test_stream_id_is_required_where_needed(self):
+    def test_given_stream_scoped_tools_when_listing_then_stream_id_is_required(self):
+        # When
         tools = self.tools()
+
+        # Then
         for name in STREAM_SCOPED:
             with self.subTest(tool=name):
                 self.assertIn("stream_id", tools[name].input_schema["required"])
 
-    def test_browse_streams(self):
-        self.assertEqual(self.call("browse_streams")["streams"][0]["id"], "s1")
+    def test_given_a_stream_when_browsing_streams_then_it_is_listed(self):
+        # When
+        result = self.call("browse_streams")
 
-    def test_investigate_incident_round_trip(self):
+        # Then
+        self.assertEqual(result["streams"][0]["id"], "s1")
+
+    def test_given_real_services_when_investigating_then_no_section_is_an_error(self):
+        # Given: real services, so a call that no longer fits a service's signature
+        # becomes an Internal section here, which the error check catches.
+
+        # When
         result = self.call("investigate_incident", query="level:3", stream_id="s1")
-        self.assertEqual(result["query"], "level:3")
-        self.assertEqual(result["stream_id"], "s1")
-        self.assertIn("cluster_health", result)
-        self.assertIn("message_volume", result)
-        self.assertIn("top_values", result)
-        self.assertIn("configuration", result)
 
-    def test_search_round_trip(self):
+        # Then
+        self.assertEqual((result["query"], result["stream_id"]), ("level:3", "s1"))
+        self.assertEqual(error_sections(result), {})
+        self.assertEqual(result["configuration"]["stream"]["title"], "api")
+
+    def test_given_stored_messages_when_searching_then_returns_the_messages(self):
+        # When
         result = self.call("find_recent_logs", query="*", stream_id="s1")
+
+        # Then
         self.assertEqual(result["messages"], [{"msg": "boom", "pod": "a"}])
 
-    def test_sensitive_log_values_are_redacted(self):
+    def test_given_secrets_in_log_values_when_searching_then_they_are_redacted(self):
+        # Given
         self.logs.entries = [
             {
                 "password": "plain-secret",
@@ -151,8 +177,10 @@ class McpToolsTest(unittest.TestCase):
             }
         ]
 
+        # When
         result = self.call("find_recent_logs", query="*", stream_id="s1")
 
+        # Then
         self.assertEqual(
             result["messages"],
             [
@@ -165,37 +193,45 @@ class McpToolsTest(unittest.TestCase):
             ],
         )
 
-    def test_aggregate_round_trip(self):
+    def test_given_messages_when_ranking_field_values_then_counts_each_value(self):
+        # When
         result = self.call("rank_field_values", query="*", field="pod", stream_id="s1")
+
+        # Then
         self.assertEqual(result["top_values"], [{"value": "a", "count": 1}])
 
-    def test_exact_counts_round_trip(self):
+    def test_given_server_side_counts_when_counting_exactly_then_returns_the_counts(self):
+        # Given
         self.agg.tables = [AggregationTable((AggregationRow(("a",), {"count": 42}),))]
+
+        # When
         result = self.call("exact_field_counts", query="*", field="pod", stream_id="s1")
+
+        # Then
         self.assertEqual(result["top_values"], [{"value": "a", "count": 42}])
 
-    def test_boolean_argument(self):
+    def test_given_boolean_argument_when_calling_tool_then_returns_only_problem_inputs(self):
+        # Given
         self.system.input_list = [
-            InputStatus(
-                "i1", "ok", "GELF", True, None, (InputNodeState("n1", "RUNNING", None, None),)
-            ),
-            InputStatus(
-                "i2", "bad", "GELF", True, None, (InputNodeState("n1", "FAILED", None, None),)
-            ),
+            InputStatus("i1", "ok", "GELF", True, None, (InputNodeState("n1", "RUNNING", None, None),)),
+            InputStatus("i2", "bad", "GELF", True, None, (InputNodeState("n1", "FAILED", None, None),)),
         ]
+
+        # When
         result = self.call("input_status", only_problems=True)
+
+        # Then
         self.assertEqual([i["id"] for i in result["inputs"]], ["i2"])
 
-    def test_tool_handlers_forward_arguments_and_return_payloads(self) -> None:
+    def test_given_public_arguments_when_calling_each_tool_then_forwards_them_to_the_service(self):
+        # Given
         search = Mock()
         analytics = Mock()
         alerts = Mock()
         views = Mock()
         operations = Mock()
         configuration = Mock()
-        server = build_server(
-            ServiceBundle(search, analytics, alerts, views, operations, configuration)
-        )
+        server = build_server(ServiceBundle(search, analytics, alerts, views, operations, configuration))
         cases = {
             "cluster_status": (search, "cluster_info", {}),
             "browse_streams": (search, "streams", {"limit": 50, "next_cursor": ""}),
@@ -439,24 +475,30 @@ class McpToolsTest(unittest.TestCase):
 
         for name, (service, method_name, args) in cases.items():
             with self.subTest(tool=name):
-                result = json.loads(
-                    _text_of(asyncio.run(server.call_tool(name, public_args.get(name, args))))
-                )
+                # When
+                result = json.loads(_text_of(asyncio.run(server.call_tool(name, public_args.get(name, args)))))
+
+                # Then
                 self.assertEqual(result, {"handled_by": name})
                 getattr(service, method_name).assert_called_once_with(**args)
 
-    def test_domain_errors_become_error_payloads(self):
+    def test_given_invalid_arguments_when_calling_tools_then_returns_invalid_request_payloads(self):
+        # When
         result = self.call("find_recent_logs", query="*", stream_id=" ")
+
+        # Then
         self.assertEqual(result["kind"], "InvalidRequest")
         self.assertIn("browse_streams", result["error"])
 
+        # When
         result = self.call("count_over_time", query="*", stream_id="s1", interval="soon")
+
+        # Then
         self.assertEqual(result["kind"], "InvalidRequest")
 
-    def test_backend_errors_become_error_payloads(self):
-        self.assertEqual(
-            self.call("read_log_message", index="i", message_id="missing")["kind"], "NotFound"
-        )
+    def test_given_missing_resources_when_calling_tools_then_returns_not_found_payloads(self):
+        # When / Then
+        self.assertEqual(self.call("read_log_message", index="i", message_id="missing")["kind"], "NotFound")
         self.assertEqual(self.call("stream_rules", stream_id="nope")["kind"], "NotFound")
         self.assertEqual(self.call("run_saved_search", view_id="nope")["kind"], "NotFound")
 

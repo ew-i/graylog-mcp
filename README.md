@@ -15,9 +15,9 @@ alerts, saved searches, cluster health and configuration.
 |               | `find_recent_logs` / `find_logs_between` | Message search; each hit carries `_index` and `_id`                     |                    |
 |               | `read_log_message`                       | One message in full                                                     |                    |
 |               | `rank_field_values`                      | Top values from a sample of ≤1000 newest matches                        |                    |
-|               | `discover_fields`                        | Field names seen in recent messages                                     |                    |
+|               | `discover_fields`                        | Fields with type, and whether groupable or numeric                      |                    |
 | Analysis      | `count_matches`                          | Number of hits only                                                     |                    |
-|               | `count_over_time`                        | Histogram, optionally split by a field                                  | 5.1+               |
+|               | `count_over_time`                        | Histogram, optionally split by a field                                  | 6.3+ (not 5.1)     |
 |               | `exact_field_counts`                     | Exact top values, counted server-side                                   | 5.1+               |
 |               | `compare_windows`                        | Now vs. earlier window; totals and per-value changes                    | per-value: 5.1+    |
 |               | `field_stats`                            | count/avg/min/max/sum/percentiles of a numeric field                    | 5.1+               |
@@ -37,7 +37,9 @@ alerts, saved searches, cluster health and configuration.
 | Investigation | `investigate_incident`                   | Composite incident triage across health, logs, alerts and configuration | varies             |
 
 **5.1+** tools use Graylog's Search Scripting API. On older servers they return
-`{"kind": "Unsupported", ...}`; the rest keep working. **Needs** lists the token
+`{"kind": "Unsupported", ...}`; the rest keep working. `count_over_time` also needs
+time grouping, which the 5.1 API lacks; it is verified on 6.3 and 7.1 (5.2 to 6.2
+are untested). **Needs** lists the token
 permissions beyond reading streams; without them a tool returns `{"kind": "AccessDenied"}`.
 
 All tools are read-only. Paginated logs, events, streams, dashboards, saved
@@ -59,16 +61,16 @@ Stable reference data is also exposed as MCP resources, so a client can attach
 it as context without a tool call. The Graylog-backed resources return the same
 JSON as the matching tool (redacted; failures as `{"error": ..., "kind": ...}`).
 
-| Resource                               | Contents                                         | Same as             |
-|----------------------------------------|--------------------------------------------------|---------------------|
-| `graylog://streams`                    | Streams you may query, with IDs                  | `browse_streams`    |
-| `graylog://saved-searches`             | Saved searches, with IDs for `run_saved_search`  | `saved_searches`    |
-| `graylog://streams/{stream_id}/fields` | Field names in a stream's newest messages (30 d) | `discover_fields`   |
-| `graylog://cluster/status`             | Version, cluster identity, processing state      | `cluster_status`    |
-| `graylog://alerts/definitions`         | Event/alert definitions                          | `alert_definitions` |
-| `graylog://config/index-sets`          | Rotation and retention                           | `index_sets`        |
-| `graylog://config/pipelines`           | Pipelines, stages and rules                      | `pipeline_rules`    |
-| `graylog://guide/query-syntax`         | Query syntax and how to use these tools          | static Markdown     |
+| Resource                               | Contents                                           | Same as             |
+|----------------------------------------|----------------------------------------------------|---------------------|
+| `graylog://streams`                    | Streams you may query, with IDs                    | `browse_streams`    |
+| `graylog://saved-searches`             | Saved searches, with IDs for `run_saved_search`    | `saved_searches`    |
+| `graylog://streams/{stream_id}/fields` | A stream's fields with type and capabilities (30d) | `discover_fields`   |
+| `graylog://cluster/status`             | Version, cluster identity, processing state        | `cluster_status`    |
+| `graylog://alerts/definitions`         | Event/alert definitions                            | `alert_definitions` |
+| `graylog://config/index-sets`          | Rotation and retention                             | `index_sets`        |
+| `graylog://config/pipelines`           | Pipelines, stages and rules                        | `pipeline_rules`    |
+| `graylog://guide/query-syntax`         | Query syntax and how to use these tools            | static Markdown     |
 
 `graylog://streams/{stream_id}/fields` is a resource template; clients list it
 separately from the fixed resources. Successful Graylog reads are cached per
@@ -394,6 +396,27 @@ uv lock --check                  # verify that the lockfile matches the project 
 Style: PEP 8 via ruff (`E`, `W`, `F`, `N`, `I`, `B`, `UP`, `SIM`, `C4`), 99-character
 lines (PEP 8 allows teams to agree on up to 99), `X | None` annotations, exceptions
 named `...Error`.
+
+**Live check** (opt-in, not in CI): runs every tool, resource and prompt against a
+real Graylog. `scripts/live/stack.py` starts a throwaway stack (Graylog, OpenSearch,
+MongoDB) in Docker for each supported version line, on localhost only with the
+login admin / admin:
+
+| Version | Web / API                | GELF HTTP                     |
+|---------|--------------------------|-------------------------------|
+| `5.1`   | `http://localhost:29000` | `http://localhost:29001/gelf` |
+| `6.3`   | `http://localhost:39000` | `http://localhost:39001/gelf` |
+| `7.1`   | `http://localhost:49000` | `http://localhost:49001/gelf` |
+
+```bash
+python scripts/live/stack.py up 7.1
+uv run python scripts/live_check.py --base-url http://localhost:49000 \
+    --user admin --password admin --gelf-url http://localhost:49001/gelf
+python scripts/live/stack.py down 7.1
+```
+
+Against your own server, pass `--api-token`, your GELF HTTP input URL and the
+`--stream-id` its messages land in.
 
 ## CI
 

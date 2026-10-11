@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 from ..domain.errors import InvalidRequestError
+from ..domain.models import LastSeconds
 
 
 @dataclass(frozen=True)
@@ -25,6 +26,10 @@ class Limits:
     max_listing: int = 200
     # OpenSearch's default index.max_result_window: offset + size may not exceed it.
     max_result_window: int = 10_000
+
+    def recent_window(self, seconds: int) -> LastSeconds:
+        """The last `seconds`, clamped to between one second and the longest window."""
+        return LastSeconds(clamp(seconds, 1, self.max_window_seconds))
 
 
 Clock = Callable[[], datetime]

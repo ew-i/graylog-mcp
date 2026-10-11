@@ -16,9 +16,10 @@ from graylog_mcp.domain.configuration import (
     PipelineRule,
     StreamConfig,
 )
-from graylog_mcp.domain.errors import NotFoundError
+from graylog_mcp.domain.errors import NotFoundError, UnsupportedError
 from graylog_mcp.domain.models import (
     ClusterInfo,
+    FieldInfo,
     ListingPage,
     ListingQuery,
     LogEntry,
@@ -43,15 +44,15 @@ def _listing(items: list, query: ListingQuery) -> ListingPage:
 
 @dataclass
 class FakeLogStore:
-    info: ClusterInfo = field(
-        default_factory=lambda: ClusterInfo("6.1.0", "Noir", "c1", "n1", "gl-host", True, "UTC")
-    )
+    info: ClusterInfo = field(default_factory=lambda: ClusterInfo("6.1.0", "Noir", "c1", "n1", "gl-host", True, "UTC"))
     stream_list: list[Stream] = field(default_factory=list)
     entries: list[dict] = field(default_factory=list)
     total_hits: int | None = None
     stored: dict[tuple[str, str], dict] = field(default_factory=dict)
     queries: list[LogQuery] = field(default_factory=list)
     responder: Callable[[LogQuery], SearchPage] | None = None
+    field_info: list[FieldInfo] | None = None  # None: no field-types API, as before 5.1-era
+    field_type_requests: list[tuple] = field(default_factory=list)
 
     def cluster_info(self) -> ClusterInfo:
         return self.info
@@ -63,13 +64,17 @@ class FakeLogStore:
     def stream_exists(self, stream_id: str) -> bool:
         return any(s.id == stream_id for s in self.stream_list)
 
+    def field_types(self, stream_id, window) -> list[FieldInfo]:
+        self.field_type_requests.append((stream_id, window))
+        if self.field_info is None:
+            raise UnsupportedError("no field-types API")
+        return list(self.field_info)
+
     def search(self, query: LogQuery) -> SearchPage:
         self.queries.append(query)
         if self.responder:
             return self.responder(query)
-        hits = tuple(
-            LogEntry(e) for e in self.entries[query.offset : query.offset + query.max_results]
-        )
+        hits = tuple(LogEntry(e) for e in self.entries[query.offset : query.offset + query.max_results])
         total = self.total_hits if self.total_hits is not None else len(self.entries)
         return SearchPage(total_hits=total, entries=hits, next_offset=query.offset + len(hits))
 
@@ -86,13 +91,14 @@ class FakeLogStore:
 
 @dataclass
 class FakeAggregationStore:
-    tables: list[AggregationTable] = field(
-        default_factory=list
-    )  # returned in order, last one repeats
+    tables: list[AggregationTable] = field(default_factory=list)  # returned in order, last one repeats
     queries: list[AggregationQuery] = field(default_factory=list)
+    error: Exception | None = None
 
     def aggregate(self, query: AggregationQuery) -> AggregationTable:
         self.queries.append(query)
+        if self.error is not None:
+            raise self.error
         if not self.tables:
             return AggregationTable(rows=())
         return self.tables[min(len(self.queries), len(self.tables)) - 1]
@@ -162,6 +168,7 @@ class FakeConfigStore:
     sets: list[IndexSet] = field(default_factory=list)
     tables: list[LookupTable] = field(default_factory=list)
     lookups: dict[tuple[str, str], LookupResult] = field(default_factory=dict)
+    existence_checks: list[str] = field(default_factory=list)
 
     def stream(self, stream_id: str) -> StreamConfig:
         try:
@@ -185,7 +192,22 @@ class FakeConfigStore:
         return _listing(self.tables, query)
 
     def lookup(self, table: str, key: str) -> LookupResult:
-        try:
-            return self.lookups[(table, key)]
-        except KeyError:
-            raise NotFoundError(f"{table}/{key}") from None
+        # Like Graylog: an unknown table or a failing adapter both answer has_error.
+        found = self.lookups.get((table, key))
+        return found or LookupResult(table, key, None, None, None, True, None)
+
+    def lookup_table_exists(self, table: str) -> bool:
+        self.existence_checks.append(table)
+        return any(t.name == table for t in self.tables)
+
+
+def error_sections(result: object, path: str = "") -> dict[str, object]:
+    """Every nested {"error", "kind"} payload in a composite result, by its path."""
+    if not isinstance(result, dict):
+        return {}
+    if "error" in result and "kind" in result:
+        return {path or "<root>": result["kind"]}
+    found: dict[str, object] = {}
+    for key, value in result.items():
+        found.update(error_sections(value, f"{path}.{key}" if path else key))
+    return found

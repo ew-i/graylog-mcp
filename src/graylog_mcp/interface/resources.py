@@ -8,6 +8,7 @@ uncached for when fresh data matters. The query guide is static text.
 
 from __future__ import annotations
 
+import threading
 import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
@@ -32,22 +33,29 @@ _JSON = "application/json"
 
 
 class TtlCache:
-    """Keeps each successful load for `ttl` seconds."""
+    """Keeps each successful load for `ttl` seconds.
+
+    MCP runs resource reads in worker threads, so the entries are guarded by a
+    lock; `load` runs outside it, so one slow Graylog call blocks no other read.
+    """
 
     def __init__(self, ttl: float, clock: Callable[[], float] = time.monotonic) -> None:
         self.ttl = ttl
         self._clock = clock
+        self._lock = threading.Lock()
         self._entries: dict[str, tuple[float, Any]] = {}
 
     def get(self, key: str, load: Callable[[], Any]) -> Any:
         now = self._clock()
-        cached = self._entries.get(key)
+        with self._lock:
+            cached = self._entries.get(key)
         if cached is not None and now - cached[0] < self.ttl:
             return cached[1]
         value = load()  # an exception propagates and leaves the cache unchanged
-        # Drop expired entries so per-stream keys cannot accumulate forever.
-        self._entries = {k: v for k, v in self._entries.items() if now - v[0] < self.ttl}
-        self._entries[key] = (now, value)
+        with self._lock:
+            # Drop expired entries so per-stream keys cannot accumulate forever.
+            self._entries = {k: v for k, v in self._entries.items() if now - v[0] < self.ttl}
+            self._entries[key] = (now, value)
         return value
 
 
@@ -93,8 +101,8 @@ def register(server: MCPServer, services: ServiceBundle, cache: TtlCache | None 
         "graylog://streams/{stream_id}/fields",
         name="stream-fields",
         description=(
-            "Field names seen in a stream's newest messages over the last "
-            f"{_FIELDS_WINDOW_SECONDS // 86400} days "
+            "A stream's fields over the last "
+            f"{_FIELDS_WINDOW_SECONDS // 86400} days with type, groupable and numeric "
             f"(same as discover_fields). {freshness}"
         ),
         mime_type=_JSON,

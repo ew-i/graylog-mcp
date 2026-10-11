@@ -48,7 +48,8 @@ def make(store_type, routes):
 
 
 class AnalyticsAdapterTest(unittest.TestCase):
-    def test_grouped_request_and_rows(self):
+    def test_given_grouped_query_when_aggregating_then_sends_body_and_maps_rows(self):
+        # Given
         store, router = make(
             GraylogAnalyticsStore,
             {
@@ -61,6 +62,8 @@ class AnalyticsAdapterTest(unittest.TestCase):
                 }
             },
         )
+
+        # When
         result = store.aggregate(
             AggregationQuery(
                 "level:3",
@@ -70,6 +73,8 @@ class AnalyticsAdapterTest(unittest.TestCase):
                 (Metric("count", descending=True),),
             )
         )
+
+        # Then
         self.assertEqual(
             router.body(),
             {
@@ -87,23 +92,27 @@ class AnalyticsAdapterTest(unittest.TestCase):
         self.assertEqual(result.rows[0].values, {"count": 4})
         self.assertEqual(result.rows[1].keys[1], None)
 
-    def test_invalid_grouping_is_rejected_at_adapter_boundary(self):
+    def test_given_unknown_grouping_type_when_aggregating_then_raises_type_error(self):
+        # Given
         store, _ = make(GraylogAnalyticsStore, {})
 
+        # When / Then
         with self.assertRaises(TypeError):
-            store.aggregate(
-                AggregationQuery("*", "s1", LastSeconds(60), (object(),), (Metric("count"),))
-            )
+            store.aggregate(AggregationQuery("*", "s1", LastSeconds(60), (object(),), (Metric("count"),)))
 
-    def test_ungrouped_uses_stream_grouping_and_keeps_own_row(self):
+    def test_given_ungrouped_query_when_aggregating_then_picks_the_streams_row_by_document_count(self):
+        # Given
+        # Graylog 6.3 labels rows with stream titles, 5.1 with IDs; the count decides.
         store, router = make(
             GraylogAnalyticsStore,
             {
                 ("POST", "/api/search/aggregate"): {
-                    "datarows": [["other-stream", 3, 10.0], ["s1", 9, 12.5]],
+                    "datarows": [["Other stream", 3, 10.0, 3], ["Default Stream", 9, 12.5, 9]],
                 }
             },
         )
+
+        # When
         result = store.aggregate(
             AggregationQuery(
                 "*",
@@ -114,75 +123,108 @@ class AnalyticsAdapterTest(unittest.TestCase):
             )
         )
         body = router.body()
+
+        # Then
         self.assertEqual(body["group_by"], [{"field": "streams", "limit": 100}])
         self.assertEqual(body["timerange"], {"type": "absolute", "from": "a", "to": "b"})
         self.assertEqual(
             body["metrics"][1],
             {"function": "percentile", "field": "t", "configuration": {"percentile": 90}},
         )
+        self.assertEqual(body["metrics"][2], {"function": "count"})  # hidden document count
         self.assertEqual(len(result.rows), 1)
-        self.assertEqual(
-            (result.rows[0].keys, result.rows[0].values), ((), {"count(t)": 9, "p90(t)": 12.5})
-        )
+        self.assertEqual((result.rows[0].keys, result.rows[0].values), ((), {"count(t)": 9, "p90(t)": 12.5}))
 
-    def test_full_text_field_errors_become_invalid_requests(self):
-        replies = (
-            '{"message":"Search type returned error: script_exception - runtime error."}',
-            '{"message":"illegal_argument_exception - Text fields are not optimised for ..."}',
+    def test_given_plain_count_or_no_rows_when_aggregating_ungrouped_then_reuses_the_plain_count_and_returns_no_rows(self):
+        # Given
+        store, router = make(
+            GraylogAnalyticsStore,
+            {("POST", "/api/search/aggregate"): {"datarows": [["a", 2], ["b", 5]]}},
         )
-        query = AggregationQuery(
-            "*",
-            "s1",
-            LastSeconds(60),
-            (ValuesGrouping("message", 5),),
-            (
-                Metric("count"),
-                Metric("avg", "duration_ms"),
-                Metric("max", "message"),
-                Metric("min", "duration_ms"),
-            ),
-        )
-        for reply in replies:
-            with self.subTest(reply=reply):
-                store, _ = make(
-                    GraylogAnalyticsStore,
-                    {("POST", "/api/search/aggregate"): httpx.Response(400, text=reply)},
-                )
-                with self.assertRaisesRegex(
-                    InvalidRequestError, "could not aggregate message, duration_ms\\. "
-                ):
-                    store.aggregate(query)
+        query = AggregationQuery("*", "s1", LastSeconds(60), (), (Metric("count"),))
 
-    def test_other_aggregation_errors_stay_backend_errors(self):
+        # When / Then
+        self.assertEqual(store.aggregate(query).rows[0].values, {"count": 5})
+        self.assertEqual(router.body()["metrics"], [{"function": "count"}])
+
+        # Given
+        store, _ = make(GraylogAnalyticsStore, {("POST", "/api/search/aggregate"): {}})
+
+        # When / Then
+        self.assertEqual(store.aggregate(query).rows, ())
+
+    def test_given_full_text_field_rejection_when_aggregating_then_passes_the_backend_error_through(self):
+        # Given: the analytics service names the field from field types, whatever the wording.
+        reply = '{"message":"search_phase_execution_exception, reason=all shards failed"}'
+        store, _ = make(
+            GraylogAnalyticsStore,
+            {("POST", "/api/search/aggregate"): httpx.Response(400, text=reply)},
+        )
+        query = AggregationQuery("*", "s1", LastSeconds(60), (ValuesGrouping("message", 5),), (Metric("count"),))
+
+        # When
+        with self.assertRaises(BackendError) as raised:
+            store.aggregate(query)
+
+        # Then
+        self.assertRegex(str(raised.exception), "all shards failed")
+
+    def test_given_no_time_grouping_on_5_1_when_aggregating_then_raises_unsupported(self):
+        # Given
+        reply = '{"message":"Unable to map property timeunit. Known properties: field, limit"}'
+        store, _ = make(
+            GraylogAnalyticsStore,
+            {("POST", "/api/search/aggregate"): httpx.Response(400, text=reply)},
+        )
+        query = AggregationQuery("*", "s1", LastSeconds(60), (TimeGrouping("5m"),), (Metric("count"),))
+
+        # When
+        with self.assertRaises(UnsupportedError) as raised:
+            store.aggregate(query)
+
+        # Then
+        self.assertRegex(str(raised.exception), "cannot group by time")
+
+    def test_given_other_aggregation_error_when_aggregating_then_raises_backend_error(self):
+        # Given
         store, _ = make(
             GraylogAnalyticsStore,
             {("POST", "/api/search/aggregate"): httpx.Response(400, text="query_parsing failed")},
         )
+
+        # When
         with self.assertRaises(BackendError) as ctx:
             store.aggregate(AggregationQuery("*", "s1", LastSeconds(60), (), (Metric("count"),)))
+
+        # Then
         self.assertNotIsInstance(ctx.exception, InvalidRequestError)
 
-    def test_missing_endpoint_means_unsupported_version(self):
+    def test_given_no_aggregate_endpoint_when_aggregating_then_raises_unsupported_naming_5_1(self):
+        # Given
         store, _ = make(GraylogAnalyticsStore, {})
+
+        # When
         with self.assertRaises(UnsupportedError) as ctx:
             store.aggregate(AggregationQuery("*", "s1", LastSeconds(60), (), (Metric("count"),)))
+
+        # Then
         self.assertIn("5.1", str(ctx.exception))
 
-    def test_malformed_rows(self):
+    def test_given_malformed_rows_when_aggregating_then_raises_backend_error(self):
+        # Given
         store, _ = make(
             GraylogAnalyticsStore,
             {("POST", "/api/search/aggregate"): {"datarows": [["only-one"]]}},
         )
+
+        # When / Then
         with self.assertRaises(BackendError):
-            store.aggregate(
-                AggregationQuery(
-                    "*", "s1", LastSeconds(60), (ValuesGrouping("x", 1),), (Metric("count"),)
-                )
-            )
+            store.aggregate(AggregationQuery("*", "s1", LastSeconds(60), (ValuesGrouping("x", 1),), (Metric("count"),)))
 
 
 class AlertAdapterTest(unittest.TestCase):
-    def test_event_search_body_and_parsing(self):
+    def test_given_events_reply_when_searching_events_then_sends_body_and_maps_events(self):
+        # Given
         store, router = make(
             GraylogAlertStore,
             {
@@ -205,15 +247,15 @@ class AlertAdapterTest(unittest.TestCase):
                         {"id": "e2", "event_definition_id": "d9", "alert": False},
                     ],
                     "total_events": 12,
-                    "context": {
-                        "event_definitions": {"d1": {"id": "d1", "title": "Errors spiking"}}
-                    },
+                    "context": {"event_definitions": {"d1": {"id": "d1", "title": "Errors spiking"}}},
                 }
             },
         )
-        page = store.events(
-            EventQuery(window=LastSeconds(600), limit=20, text="db", definition_ids=("d1",))
-        )
+
+        # When
+        page = store.events(EventQuery(window=LastSeconds(600), limit=20, text="db", definition_ids=("d1",)))
+
+        # Then
         self.assertEqual(
             router.body(),
             {
@@ -228,17 +270,21 @@ class AlertAdapterTest(unittest.TestCase):
         )
         self.assertEqual((page.total, page.next_offset), (12, 20))
         first, second = page.events
-        self.assertEqual(
-            (first.definition_title, first.priority, first.fields), ("Errors spiking", 3, {"n": 2})
-        )
+        self.assertEqual((first.definition_title, first.priority, first.fields), ("Errors spiking", 3, {"n": 2}))
         self.assertEqual((second.id, second.definition_title, second.alert), ("e2", None, False))
 
-    def test_include_non_alerts(self):
+    def test_given_non_alerts_wanted_when_searching_events_then_filter_includes_them(self):
+        # Given
         store, router = make(GraylogAlertStore, {("POST", "/api/events/search"): {"events": []}})
+
+        # When
         store.events(EventQuery(window=LastSeconds(60), limit=1, alerts_only=False))
+
+        # Then
         self.assertEqual(router.body()["filter"], {"alerts": "include"})
 
-    def test_events_tolerate_malformed_definition_context(self):
+    def test_given_malformed_definition_context_when_searching_events_then_event_has_no_title(self):
+        # Given
         store, _ = make(
             GraylogAlertStore,
             {
@@ -248,10 +294,15 @@ class AlertAdapterTest(unittest.TestCase):
                 }
             },
         )
+
+        # When
         page = store.events(EventQuery(window=LastSeconds(60), limit=1))
+
+        # Then
         self.assertEqual(page.events[0].definition_title, None)
 
-    def test_definitions_accept_either_list_key(self):
+    def test_given_either_list_key_when_listing_definitions_then_parses_definition_and_pages_by_number(self):
+        # Given
         definition = {
             "id": "d1",
             "title": "Errors",
@@ -267,15 +318,15 @@ class AlertAdapterTest(unittest.TestCase):
         }
         for key in ("event_definitions", "elements"):
             with self.subTest(key=key):
-                store, router = make(
-                    GraylogAlertStore, {("GET", "/api/events/definitions"): {key: [definition]}}
-                )
+                store, router = make(GraylogAlertStore, {("GET", "/api/events/definitions"): {key: [definition]}})
+
+                # When
                 page = store.definitions(ListingQuery(10, "err", offset=10))
+
+                # Then
                 [d] = page.items
                 self.assertEqual(page.next_offset, 20)
-                self.assertEqual(
-                    (d.kind, d.stream_ids, d.search_within_ms), ("aggregation-v1", ("s1",), 300000)
-                )
+                self.assertEqual((d.kind, d.stream_ids, d.search_within_ms), ("aggregation-v1", ("s1",), 300000))
                 self.assertEqual(
                     dict(router.requests[-1].url.params),
                     {"page": "2", "per_page": "10", "query": "err"},
@@ -283,25 +334,29 @@ class AlertAdapterTest(unittest.TestCase):
 
 
 class ViewAdapterTest(unittest.TestCase):
-    def test_listings(self):
+    def test_given_view_listings_when_listing_then_returns_summaries_and_sends_query_only_when_given(self):
+        # Given
         store, router = make(
             GraylogViewStore,
             {
                 ("GET", "/api/search/saved"): {
-                    "elements": [
-                        {"id": "v1", "title": "Errors", "owner": "admin", "last_updated_at": "t"}
-                    ]
+                    "elements": [{"id": "v1", "title": "Errors", "owner": "admin", "last_updated_at": "t"}]
                 },
                 ("GET", "/api/dashboards"): {"views": [{"id": "d1", "title": "Ops"}]},
             },
         )
+
+        # When
         [saved] = store.saved_searches(ListingQuery(5, "err")).items
+
+        # Then
         self.assertEqual((saved.id, saved.owner, saved.last_updated), ("v1", "admin", "t"))
         self.assertEqual(router.requests[-1].url.params["query"], "err")
         self.assertEqual(store.dashboards(ListingQuery(5)).items[0].title, "Ops")
         self.assertNotIn("query", router.requests[-1].url.params)
 
-    def test_saved_query_parsing(self):
+    def test_given_saved_search_when_reading_query_then_returns_text_streams_and_window(self):
+        # Given
         search = {
             "queries": [
                 {
@@ -324,13 +379,18 @@ class ViewAdapterTest(unittest.TestCase):
                 ("GET", "/api/views/search/q1"): search,
             },
         )
+
+        # When
         saved = store.saved_query("v1")
+
+        # Then
         self.assertEqual(
             (saved.query_text, saved.stream_ids, saved.window),
             ("level:3", ("s1", "s2"), LastSeconds(300)),
         )
 
-    def test_time_range_variants(self):
+    def test_given_time_range_variants_when_reading_saved_query_then_returns_window_or_keyword(self):
+        # Given
         cases = [
             ({"type": "relative", "from": 900}, LastSeconds(900), None),
             ({"type": "absolute", "from": "a", "to": "b"}, Between("a", "b"), None),
@@ -346,9 +406,14 @@ class ViewAdapterTest(unittest.TestCase):
                         ("GET", "/api/views/search/q1"): {"queries": [{"timerange": timerange}]},
                     },
                 )
+
+                # When
                 saved = store.saved_query("v1")
+
+                # Then
                 self.assertEqual((saved.window, saved.keyword), (window, keyword))
 
+        # Given
         store, _ = make(
             GraylogViewStore,
             {
@@ -356,30 +421,41 @@ class ViewAdapterTest(unittest.TestCase):
                 ("GET", "/api/views/search/q1"): {"queries": [{"timerange": {"type": "other"}}]},
             },
         )
+
+        # When
         saved = store.saved_query("v1")
+
+        # Then
         self.assertEqual((saved.window, saved.keyword), (None, "other"))
 
-    def test_saved_query_handles_missing_timerange_and_nested_non_dict_filter(self):
+    def test_given_odd_timerange_and_filter_when_reading_saved_query_then_returns_no_streams_window_or_keyword(self):
+        # Given
         store, _ = make(
             GraylogViewStore,
             {
                 ("GET", "/api/views/v1"): {"search_id": "q1"},
-                ("GET", "/api/views/search/q1"): {
-                    "queries": [{"filter": ["not a tree"], "timerange": "all"}]
-                },
+                ("GET", "/api/views/search/q1"): {"queries": [{"filter": ["not a tree"], "timerange": "all"}]},
             },
         )
+
+        # When
         saved = store.saved_query("v1")
+
+        # Then
         self.assertEqual((saved.stream_ids, saved.window, saved.keyword), ((), None, None))
 
-    def test_saved_query_requires_search_attachment(self):
+    def test_given_view_without_search_when_reading_saved_query_then_rejects_it(self):
+        # Given
         store, _ = make(GraylogViewStore, {("GET", "/api/views/v1"): {}})
+
+        # When / Then
         with self.assertRaises(InvalidRequestError):
             store.saved_query("v1")
 
 
 class SystemAdapterTest(unittest.TestCase):
-    def test_inputs_merge_cluster_states(self):
+    def test_given_cluster_input_states_when_reading_inputs_then_merges_states_per_node(self):
+        # Given
         store, _ = make(
             GraylogSystemStore,
             {
@@ -407,14 +483,17 @@ class SystemAdapterTest(unittest.TestCase):
                 },
             },
         )
+
+        # When
         first, second = store.inputs()
-        self.assertEqual(
-            [(s.node_id, s.state) for s in first.states], [("n1", "RUNNING"), ("n2", "FAILED")]
-        )
+
+        # Then
+        self.assertEqual([(s.node_id, s.state) for s in first.states], [("n1", "RUNNING"), ("n2", "FAILED")])
         self.assertEqual(first.health, "problem")
         self.assertEqual((second.health, second.node_id), ("unknown", "n1"))
 
-    def test_inputs_fall_back_to_local_states(self):
+    def test_given_no_cluster_states_when_reading_inputs_then_uses_local_states(self):
+        # Given
         store, _ = make(
             GraylogSystemStore,
             {
@@ -422,9 +501,12 @@ class SystemAdapterTest(unittest.TestCase):
                 ("GET", "/api/system/inputstates"): {"states": [{"id": "i1", "state": "RUNNING"}]},
             },
         )
+
+        # When / Then
         self.assertEqual(store.inputs()[0].states[0].node_id, "local")
 
-    def test_inputs_skip_state_without_id_and_parse_nested_metric_values(self):
+    def test_given_odd_states_and_metrics_when_reading_then_skips_state_without_id_and_parses_nested_metric(self):
+        # Given
         store, _ = make(
             GraylogSystemStore,
             {
@@ -446,20 +528,25 @@ class SystemAdapterTest(unittest.TestCase):
                 },
             },
         )
+
+        # When / Then
         self.assertEqual(store.inputs()[0].states, ())
         self.assertEqual(store.throughput()[0].metrics["input_per_second"], 4)
 
-    def test_throughput_cluster_and_local(self):
+    def test_given_cluster_or_local_metrics_when_reading_throughput_then_maps_cluster_and_local_metrics(self):
+        # Given
         metrics = {
             "metrics": [
                 {"full_name": "org.graylog2.throughput.input.1-sec-rate", "metric": {"value": 42}},
                 {"full_name": "org.graylog2.journal.entries-uncommitted", "metric": {"value": 7}},
             ]
         }
-        store, router = make(
-            GraylogSystemStore, {("POST", "/api/cluster/metrics/multiple"): {"n1": metrics}}
-        )
+        store, router = make(GraylogSystemStore, {("POST", "/api/cluster/metrics/multiple"): {"n1": metrics}})
+
+        # When
         [node] = store.throughput()
+
+        # Then
         self.assertEqual(
             (
                 node.node_id,
@@ -471,10 +558,14 @@ class SystemAdapterTest(unittest.TestCase):
         self.assertIsNone(node.metrics["output_per_second"])
         self.assertIn("org.graylog2.buffers.process.usage", router.body()["metrics"])
 
+        # Given
         store, _ = make(GraylogSystemStore, {("POST", "/api/system/metrics/multiple"): metrics})
+
+        # When / Then
         self.assertEqual(store.throughput()[0].node_id, "local")
 
-    def test_notifications(self):
+    def test_given_notification_when_listing_then_keeps_severity_and_details(self):
+        # Given
         store, _ = make(
             GraylogSystemStore,
             {
@@ -491,12 +582,15 @@ class SystemAdapterTest(unittest.TestCase):
                 }
             },
         )
-        [note] = store.notifications()
-        self.assertEqual(
-            (note.severity, note.details["journal_utilization_percentage"]), ("urgent", 95)
-        )
 
-    def test_nodes_merge_and_unreachable(self):
+        # When
+        [note] = store.notifications()
+
+        # Then
+        self.assertEqual((note.severity, note.details["journal_utilization_percentage"]), ("urgent", 95))
+
+    def test_given_overview_and_registry_when_listing_nodes_then_merges_overview_and_registry(self):
+        # Given
         store, _ = make(
             GraylogSystemStore,
             {
@@ -521,13 +615,13 @@ class SystemAdapterTest(unittest.TestCase):
                 },
             },
         )
+
+        # When
         n1, n2 = store.nodes()
-        self.assertEqual(
-            (n1.is_leader, n1.transport_address, n1.healthy), (True, "http://gl-1:9000/", True)
-        )
-        self.assertEqual(
-            (n2.reachable, n2.hostname, n2.is_leader, n2.healthy), (False, "gl-2", False, False)
-        )
+
+        # Then
+        self.assertEqual((n1.is_leader, n1.transport_address, n1.healthy), (True, "http://gl-1:9000/", True))
+        self.assertEqual((n2.reachable, n2.hostname, n2.is_leader, n2.healthy), (False, "gl-2", False, False))
 
 
 ROTATION_CLASS = "org.graylog2.indexer.rotation.strategies.TimeBasedRotationStrategy"
@@ -535,7 +629,8 @@ RETENTION_CLASS = "org.graylog2.indexer.retention.strategies.DeletionRetentionSt
 
 
 class ConfigAdapterTest(unittest.TestCase):
-    def test_stream(self):
+    def test_given_stream_with_rules_when_reading_then_maps_rules_and_escapes_the_path(self):
+        # Given
         store, router = make(
             GraylogConfigStore,
             {
@@ -548,14 +643,19 @@ class ConfigAdapterTest(unittest.TestCase):
                 }
             },
         )
+
+        # When
         stream = store.stream("s/1")
+
+        # Then
         self.assertEqual(
             (stream.matching_type, stream.index_set_id, stream.rules[0].type_name),
             ("AND", "is1", "exact"),
         )
         self.assertEqual(router.requests[-1].url.raw_path, b"/api/streams/s%2F1")
 
-    def test_pipelines_connections_rules(self):
+    def test_given_pipeline_endpoints_when_reading_then_maps_stages_connections_and_rules(self):
+        # Given
         store, _ = make(
             GraylogConfigStore,
             {
@@ -569,15 +669,15 @@ class ConfigAdapterTest(unittest.TestCase):
                         ],
                     },
                 ],
-                ("GET", "/api/system/pipelines/connections"): [
-                    {"id": "c1", "stream_id": "s1", "pipeline_ids": ["p1"]}
-                ],
-                ("GET", "/api/system/pipelines/rule"): [
-                    {"id": "r1", "title": "a", "source": 'rule "a" ...'}
-                ],
+                ("GET", "/api/system/pipelines/connections"): [{"id": "c1", "stream_id": "s1", "pipeline_ids": ["p1"]}],
+                ("GET", "/api/system/pipelines/rule"): [{"id": "r1", "title": "a", "source": 'rule "a" ...'}],
             },
         )
+
+        # When
         [pipeline] = store.pipelines()
+
+        # Then
         self.assertEqual(
             [(s.stage, s.match, s.rules) for s in pipeline.stages],
             [(0, "ALL", ("a",)), (1, "EITHER", ("b",))],
@@ -585,14 +685,16 @@ class ConfigAdapterTest(unittest.TestCase):
         self.assertEqual(store.pipeline_connections()[0].pipeline_ids, ("p1",))
         self.assertEqual(store.pipeline_rules()[0].source, 'rule "a" ...')
 
-    def test_list_endpoint_returning_object_is_an_error(self):
-        store, _ = make(
-            GraylogConfigStore, {("GET", "/api/system/pipelines/pipeline"): {"oops": True}}
-        )
+    def test_given_object_where_list_expected_when_reading_pipelines_then_raises_backend_error(self):
+        # Given
+        store, _ = make(GraylogConfigStore, {("GET", "/api/system/pipelines/pipeline"): {"oops": True}})
+
+        # When / Then
         with self.assertRaises(BackendError):
             store.pipelines()
 
-    def test_index_sets(self):
+    def test_given_index_set_when_reading_then_simplifies_the_strategies(self):
+        # Given
         store, router = make(
             GraylogConfigStore,
             {
@@ -618,20 +720,23 @@ class ConfigAdapterTest(unittest.TestCase):
                 }
             },
         )
+
+        # When
         [s] = store.index_sets()
+
+        # Then
         self.assertEqual(s.rotation.name, "TimeBasedRotationStrategy")
         self.assertEqual(s.rotation.config, {"rotation_period": "P1D"})
         self.assertEqual(s.retention.config, {"max_number_of_indices": 30})
         self.assertEqual(s.data_tiering, {"index_lifetime_min": "P30D"})
         self.assertEqual(router.requests[-1].url.params["stats"], "false")
 
-    def test_lookup(self):
+    def test_given_lookup_table_when_listing_and_looking_up_then_returns_the_value(self):
+        # Given
         store, router = make(
             GraylogConfigStore,
             {
-                ("GET", "/api/system/lookup/tables"): {
-                    "lookup_tables": [{"id": "t1", "name": "hosts", "title": "Hosts"}]
-                },
+                ("GET", "/api/system/lookup/tables"): {"lookup_tables": [{"id": "t1", "name": "hosts", "title": "Hosts"}]},
                 ("GET", "/api/system/lookup/tables/hosts/query"): {
                     "single_value": "db-1",
                     "has_error": False,
@@ -639,12 +744,15 @@ class ConfigAdapterTest(unittest.TestCase):
                 },
             },
         )
+
+        # When / Then
         self.assertEqual(store.lookup_tables(ListingQuery(10, "hosts")).items[0].name, "hosts")
         result = store.lookup("hosts", "10.0.0.1")
         self.assertEqual((result.single_value, result.ttl), ("db-1", 60))
         self.assertEqual(router.requests[-1].url.params["key"], "10.0.0.1")
 
-    def test_page_numbered_listing_advances_a_whole_page_past_dropped_entries(self):
+    def test_given_dropped_entry_when_paging_by_number_then_moves_next_offset_a_whole_page_on(self):
+        # Given
         store, router = make(
             GraylogConfigStore,
             {
@@ -654,29 +762,46 @@ class ConfigAdapterTest(unittest.TestCase):
                 }
             },
         )
+
+        # When
         page = store.lookup_tables(ListingQuery(2, offset=4))
+
+        # Then
         self.assertEqual(router.requests[-1].url.params["page"], "3")
         self.assertEqual([t.name for t in page.items], ["hosts"])  # nameless table dropped
         self.assertEqual(page.next_offset, 6)
 
-    def test_lookup_query_is_omitted_and_stage_match_can_be_missing(self):
+    def test_given_no_filter_or_stage_match_when_reading_then_omits_the_query_and_leaves_match_empty(self):
+        # Given
         store, router = make(
             GraylogConfigStore,
             {
                 ("GET", "/api/system/lookup/tables"): {"lookup_tables": []},
-                ("GET", "/api/system/pipelines/pipeline"): [
-                    {"id": "p1", "stages": [{"stage": 1, "rules": []}]}
-                ],
+                ("GET", "/api/system/pipelines/pipeline"): [{"id": "p1", "stages": [{"stage": 1, "rules": []}]}],
             },
         )
+
+        # When / Then
         self.assertEqual(store.lookup_tables(ListingQuery(5)).items, ())
         self.assertNotIn("query", router.requests[-1].url.params)
         self.assertIsNone(store.pipelines()[0].stages[0].match)
 
-    def test_unknown_table(self):
+    def test_given_unknown_table_when_looking_up_then_raises_not_found(self):
+        # Given
         store, _ = make(GraylogConfigStore, {})
+
+        # When / Then
         with self.assertRaises(NotFoundError):
             store.lookup("nope", "k")
+
+    def test_given_known_and_unknown_tables_when_checking_existence_then_answers_true_or_false(self):
+        # Given
+        store, router = make(GraylogConfigStore, {("GET", "/api/system/lookup/tables/hosts"): {"name": "hosts"}})
+
+        # When / Then
+        self.assertTrue(store.lookup_table_exists("hosts"))
+        self.assertFalse(store.lookup_table_exists("no such"))
+        self.assertEqual(router.requests[-1].url.raw_path, b"/api/system/lookup/tables/no%20such")
 
 
 if __name__ == "__main__":

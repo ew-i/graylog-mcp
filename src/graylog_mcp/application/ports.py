@@ -24,11 +24,13 @@ from ..domain.configuration import (
 )
 from ..domain.models import (
     ClusterInfo,
+    FieldInfo,
     ListingPage,
     ListingQuery,
     LogEntry,
     LogQuery,
     SearchPage,
+    TimeWindow,
 )
 from ..domain.operations import InputStatus, NodeStatus, NodeThroughput, SystemNotification
 from ..domain.views import SavedQuery
@@ -48,6 +50,10 @@ class LogStore(Protocol):
     def search(self, query: LogQuery) -> SearchPage: ...
 
     def fetch(self, index: str, message_id: str) -> LogEntry: ...
+
+    def field_types(self, stream_id: str, window: TimeWindow) -> list[FieldInfo]:
+        """Indexed fields with their capabilities; UnsupportedError without the API."""
+        ...
 
 
 class AggregationStore(Protocol):
@@ -94,3 +100,5 @@ class ConfigStore(Protocol):
     def lookup_tables(self, query: ListingQuery) -> ListingPage: ...
 
     def lookup(self, table: str, key: str) -> LookupResult: ...
+
+    def lookup_table_exists(self, table: str) -> bool: ...

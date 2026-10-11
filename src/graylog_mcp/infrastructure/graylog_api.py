@@ -53,6 +53,12 @@ class GraylogApi:
     def post_object(self, path: str, body: Mapping[str, Any]) -> dict[str, Any]:
         return _expect_object(path, self._send("POST", path, json=body))
 
+    def post_list(self, path: str, body: Mapping[str, Any]) -> list[Any]:
+        result = self._send("POST", path, json=body)
+        if not isinstance(result, list):
+            raise BackendError(f"expected a JSON array from {path}")
+        return result
+
     def _send(self, method: str, path: str, **kwargs: Any) -> Any:
         try:
             response = self._http.request(method, path, **kwargs)

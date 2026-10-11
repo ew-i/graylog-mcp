@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 from ..domain.alerts import EventDefinition, EventQuery, priority_label
-from ..domain.models import JsonDict, LastSeconds
+from ..domain.models import JsonDict
 from .pagination import listing, open_page, page_metadata, pinned_window
-from .policy import Clock, Limits, clamp, utc_now
+from .policy import Clock, Limits, utc_now
 from .ports import AlertStore
 
 
@@ -38,9 +38,7 @@ class AlertService:
             max_limit=self._limits.max_events,
             match={"text": text.strip(), "definition_id": definition_id.strip()},
             details=lambda: {
-                "window": pinned_window(
-                    LastSeconds(clamp(seconds, 1, self._limits.max_window_seconds)), self._clock()
-                ),
+                "window": pinned_window(self._limits.recent_window(seconds), self._clock()),
                 "alerts_only": alerts_only,
             },
         )

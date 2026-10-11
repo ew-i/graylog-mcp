@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict
 
-from ..domain.errors import InvalidRequestError
+from ..domain.errors import InvalidRequestError, NotFoundError
 from ..domain.models import JsonDict
 from .pagination import listing
 from .policy import Limits
@@ -124,5 +124,16 @@ class ConfigurationService:
         }
 
     def lookup_value(self, *, table: str, key: str) -> JsonDict:
-        result = self._store.lookup(_require(table, "table"), _require(key, "key"))
-        return asdict(result)
+        table, key = _require(table, "table"), _require(key, "key")
+        result = asdict(self._store.lookup(table, key))
+        # Graylog answers an unknown table and a failing data adapter the same way.
+        if result["has_error"]:
+            if not self._store.lookup_table_exists(table):
+                raise NotFoundError(
+                    f"lookup table {table!r} does not exist; call lookup_tables to find one"
+                )
+            result["note"] = (
+                "The lookup failed inside Graylog: the table exists, so its data adapter "
+                "or cache could not answer. system_notifications may say why."
+            )
+        return result

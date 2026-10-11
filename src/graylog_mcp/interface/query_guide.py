@@ -29,9 +29,10 @@ QUERY_SYNTAX = """\
 - Escape these characters with a backslash when they are part of a value:
   `& | : \\ / + - ! ( ) { } [ ] ^ " ~ * ?`, e.g. `path:\\/api\\/v1`.
 - Leading wildcards (`*error`) are disabled on most Graylog servers.
-- Group and count by structured fields. The full-text `message` field cannot be
-  used by `exact_field_counts`, `compare_windows` or `field_stats` (Graylog
-  rejects it); `rank_field_values` can rank message texts from a sample.
+- Group and count only by fields `discover_fields` marks `groupable`, and
+  measure only `numeric` ones. The full-text `message` field is neither, so
+  `exact_field_counts`, `compare_windows` and `field_stats` reject it;
+  `rank_field_values` can rank message texts from a sample.
 
 ## Using this server
 
@@ -42,10 +43,10 @@ QUERY_SYNTAX = """\
 3. Each message carries `_index` and `_id`; pass them to `read_log_message`
    for the full message or `message_context` for its neighbours.
 4. Prefer counting over reading: `count_matches`, `count_over_time`,
-   `exact_field_counts` and `compare_windows`. `count_over_time`,
-   `exact_field_counts`, `field_stats` and the per-value part of
-   `compare_windows` need Graylog 5.1+; older servers return
-   `{"kind": "Unsupported"}`.
+   `exact_field_counts` and `compare_windows`. `exact_field_counts`,
+   `field_stats` and the per-value part of `compare_windows` need Graylog
+   5.1+, and `count_over_time` a newer version (not 5.1); otherwise they
+   return `{"kind": "Unsupported"}`.
 5. Paged results return `next_cursor` while `has_more` is true; pass it back
    unchanged. `truncated` means paging alone will not return everything.
 6. Failures come back as `{"error": ..., "kind": ...}` instead of raising;

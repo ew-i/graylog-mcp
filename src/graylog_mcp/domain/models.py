@@ -105,15 +105,31 @@ class LogQuery:
             raise InvalidRequestError("offset must not be negative")
 
 
+_INTERNAL_PREFIXES = ("gl2_",)
+_INTERNAL_NAMES = frozenset({"_id", "streams"})
+
+
+def is_internal_field(name: str) -> bool:
+    """Graylog bookkeeping fields (gl2_*, _id, streams), hidden unless asked for."""
+    return name in _INTERNAL_NAMES or name.startswith(_INTERNAL_PREFIXES)
+
+
+@dataclass(frozen=True)
+class FieldInfo:
+    """A field and what Graylog can do with it; capabilities are None when unknown."""
+
+    name: str
+    type: str | None  # e.g. string, long, date
+    groupable: bool | None  # usable for grouping and per-value counts
+    numeric: bool | None  # usable for avg, min, max and percentiles
+
+
 @dataclass(frozen=True)
 class LogEntry:
     """One log message as a flat field mapping."""
 
     fields: Mapping[str, Any]
     index: str | None = None
-
-    _HIDDEN_PREFIXES = ("gl2_",)
-    _HIDDEN_KEYS = frozenset({"_id", "streams"})
 
     def visible(self, only: tuple[str, ...] = ()) -> JsonDict:
         """Return the fields a human cares about.
@@ -124,11 +140,7 @@ class LogEntry:
         """
         if only:
             return {name: self.fields[name] for name in only if name in self.fields}
-        return {
-            name: value
-            for name, value in self.fields.items()
-            if name not in self._HIDDEN_KEYS and not name.startswith(self._HIDDEN_PREFIXES)
-        }
+        return {name: value for name, value in self.fields.items() if not is_internal_field(name)}
 
     def listed(self, only: tuple[str, ...] = ()) -> JsonDict:
         """`visible` plus the `_index` and `_id` needed to fetch the message again."""

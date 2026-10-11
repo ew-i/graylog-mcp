@@ -7,6 +7,7 @@ from typing import Any
 
 from ..domain.aggregation import (
     AggregationQuery,
+    AggregationTable,
     Metric,
     TimeGrouping,
     ValuesGrouping,
@@ -15,7 +16,7 @@ from ..domain.aggregation import (
     require_field_name,
 )
 from ..domain.errors import BackendError, InvalidRequestError
-from ..domain.models import Between, JsonDict, LastSeconds, LogEntry, LogQuery, Sort, SortDirection
+from ..domain.models import Between, JsonDict, LogEntry, LogQuery, Sort, SortDirection
 from ..domain.timeutil import format_timestamp, parse_timestamp
 from .policy import Clock, Limits, clamp, parse_field_list, parse_percentiles
 from .policy import utc_now as _utc_now
@@ -63,13 +64,40 @@ class AnalyticsService:
         self._limits = limits or Limits()
         self._clock = clock
 
-    def _recent(self, seconds: int) -> LastSeconds:
-        return LastSeconds(clamp(seconds, 1, self._limits.max_window_seconds))
+    def _aggregate(self, query: AggregationQuery) -> AggregationTable:
+        """Aggregate; when Graylog rejects it, name any field that cannot be aggregated.
+
+        Graylog's wording for a full-text field differs by version, so the field
+        types decide, and are only fetched once an aggregation has failed.
+        """
+        try:
+            return self._agg.aggregate(query)
+        except BackendError as exc:
+            if type(exc) is not BackendError:  # unreachable, denied, unsupported, ...
+                raise
+            fields = dict.fromkeys(
+                [g.field for g in query.groups if isinstance(g, ValuesGrouping)]
+                + [m.field for m in query.metrics if m.field]
+            )
+            try:
+                types = {f.name: f for f in self._logs.field_types(query.stream_id, query.window)}
+            except BackendError:
+                raise exc from None
+            unusable = [
+                name for name in fields if name in types and types[name].groupable is False
+            ]
+            if not unusable:
+                raise
+            raise InvalidRequestError(
+                f"{', '.join(unusable)} cannot be grouped, counted per value or measured: "
+                "it is a full-text field. Use a field discover_fields marks groupable, or "
+                "rank_field_values to rank message texts."
+            ) from exc
 
     # -- count_matches -------------------------------------------------------
 
     def count_matches(self, *, text: str, stream_id: str, seconds: int) -> JsonDict:
-        window = self._recent(seconds)
+        window = self._limits.recent_window(seconds)
         page = self._logs.search(
             LogQuery(text=text, stream_id=stream_id, window=window, max_results=1)
         )
@@ -87,7 +115,7 @@ class AnalyticsService:
         split_by: str = "",
         split_limit: int = 5,
     ) -> JsonDict:
-        window = self._recent(seconds)
+        window = self._limits.recent_window(seconds)
         interval = interval.strip() or auto_interval(window.seconds, self._limits.default_buckets)
         buckets = -(-window.seconds // interval_seconds(interval))  # ceil
         if buckets > self._limits.max_buckets:
@@ -99,7 +127,7 @@ class AnalyticsService:
         split = split_by.strip()
         if split:
             groups.append(ValuesGrouping(split, clamp(split_limit, 1, 20)))
-        table = self._agg.aggregate(
+        table = self._aggregate(
             AggregationQuery(text, stream_id, window, tuple(groups), (Metric("count"),))
         )
 
@@ -139,9 +167,9 @@ class AnalyticsService:
     def exact_field_counts(
         self, *, text: str, stream_id: str, field: str, seconds: int, top: int
     ) -> JsonDict:
-        window = self._recent(seconds)
+        window = self._limits.recent_window(seconds)
         name = require_field_name(field)
-        table = self._agg.aggregate(
+        table = self._aggregate(
             AggregationQuery(
                 text,
                 stream_id,
@@ -201,7 +229,7 @@ class AnalyticsService:
             name = require_field_name(name)
 
             def counts(window) -> dict[str, int]:
-                table = self._agg.aggregate(
+                table = self._aggregate(
                     AggregationQuery(
                         text,
                         stream_id,
@@ -261,7 +289,7 @@ class AnalyticsService:
         group_by: str = "",
         group_limit: int = 10,
     ) -> JsonDict:
-        window = self._recent(seconds)
+        window = self._limits.recent_window(seconds)
         name = require_field_name(field)
         metrics = [
             Metric("count", name, descending=True),
@@ -277,9 +305,7 @@ class AnalyticsService:
             if group
             else ()
         )
-        table = self._agg.aggregate(
-            AggregationQuery(text, stream_id, window, groups, tuple(metrics))
-        )
+        table = self._aggregate(AggregationQuery(text, stream_id, window, groups, tuple(metrics)))
 
         def stats(values) -> JsonDict:
             out = {m.label.split("(")[0]: values.get(m.label) for m in metrics}
