@@ -1,3 +1,5 @@
 # Agent tooling, not project code: graphify's own skill text otherwise matches queries.
 .claude/
 .opencode/
+.venv/
+dist/
