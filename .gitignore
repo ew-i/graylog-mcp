@@ -222,3 +222,5 @@ __marimo__/
 .mcp.json
 .idea/
 .vscode/
+/graphify-out
+/opencode.json
