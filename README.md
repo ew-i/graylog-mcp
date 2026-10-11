@@ -449,8 +449,7 @@ Against your own server, pass `--api-token`, your GELF HTTP input URL and the
 
 ## CI
 
-`.github/workflows/deploy.yml` runs on pushes to `main`, pull requests and manual
-dispatch:
+`.github/workflows/deploy.yml` runs on pushes to `main` and manual dispatch:
 
 1. **lint**: `ruff check` (findings annotate the PR) and `ruff format --check`
 2. **test**: `pytest` on Python 3.10–3.14, plus a check that the server wires up all 29 tools
