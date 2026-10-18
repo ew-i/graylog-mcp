@@ -447,6 +447,19 @@ python scripts/live/stack.py down 7.1
 Against your own server, pass `--api-token`, your GELF HTTP input URL and the
 `--stream-id` its messages land in.
 
+### Coding agents
+
+The repo enables two agent add-ons: [ponytail](https://github.com/DietrichGebert/ponytail)
+(simplest-solution mode) and [graphify](https://pypi.org/project/graphifyy/) (code knowledge
+graph). Once per machine:
+
+```bash
+uv tool install graphifyy                                  # the .claude hooks call `graphify`
+claude plugin install ponytail@ponytail --scope project    # run in the repo root
+```
+
+- ponytail's hooks run `node`, so Node.js must be on your `PATH`.
+
 ## CI
 
 `.github/workflows/deploy.yml` runs on pushes to `main` and manual dispatch:
