@@ -25,6 +25,7 @@ from graylog_mcp.domain.models import (
     ListingQuery,
     LogEntry,
     LogQuery,
+    QueryValidation,
     SearchPage,
     Stream,
 )
@@ -54,6 +55,8 @@ class FakeLogStore:
     responder: Callable[[LogQuery], SearchPage] | None = None
     field_info: list[FieldInfo] | None = None  # None: no field-types API, as before 5.1-era
     field_type_requests: list[tuple] = field(default_factory=list)
+    validation: QueryValidation | None = None  # None: no query-validation API
+    validations: list[tuple] = field(default_factory=list)
 
     def cluster_info(self) -> ClusterInfo:
         return self.info
@@ -70,6 +73,12 @@ class FakeLogStore:
         if self.field_info is None:
             raise UnsupportedError("no field-types API")
         return list(self.field_info)
+
+    def validate(self, query, stream_id, window) -> QueryValidation:
+        self.validations.append((query, stream_id, window))
+        if self.validation is None:
+            raise UnsupportedError("no query-validation API")
+        return self.validation
 
     def search(self, query: LogQuery) -> SearchPage:
         self.queries.append(query)

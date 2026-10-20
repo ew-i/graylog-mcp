@@ -20,6 +20,7 @@ from ..domain.models import (
     SortDirection,
     TimeWindow,
     is_internal_field,
+    require_scope,
 )
 from .pagination import open_page, page_metadata, pinned_window
 from .policy import Clock, Limits, parse_field_list, utc_now
@@ -144,6 +145,20 @@ class LogService:
                 next_offset=found.next_offset,
                 reachable=self._limits.max_result_window,
             ),
+        }
+
+    def validate_query(self, *, text: str, stream_id: str, seconds: int) -> JsonDict:
+        text, stream_id = text.strip(), stream_id.strip()
+        require_scope(text, stream_id)
+        window = self._limits.recent_window(seconds)
+        found = self._store.validate(text, stream_id, window)
+        return {
+            "query": text,
+            "stream_id": stream_id,
+            "window": window.describe(),
+            "status": found.status,
+            "valid": found.status != "ERROR",
+            "problems": [asdict(p) for p in found.problems],
         }
 
     # -- single message ------------------------------------------------------

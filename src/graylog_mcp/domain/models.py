@@ -125,6 +125,22 @@ class FieldInfo:
 
 
 @dataclass(frozen=True)
+class QueryProblem:
+    """One reason Graylog gave for a query warning or error."""
+
+    kind: str | None  # e.g. UNKNOWN_FIELD, QUERY_PARSING_ERROR
+    message: str | None
+    line: int | None
+    column: int | None
+
+
+@dataclass(frozen=True)
+class QueryValidation:
+    status: str  # OK, WARNING or ERROR
+    problems: tuple[QueryProblem, ...]
+
+
+@dataclass(frozen=True)
 class LogEntry:
     """One log message as a flat field mapping."""
 

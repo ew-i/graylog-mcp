@@ -1,6 +1,6 @@
 # graylog-mcp
 
-Read-only Graylog access exposed as 29 MCP tools, 8 MCP resources, one resource
+Read-only Graylog access exposed as 30 MCP tools, 8 MCP resources, one resource
 template and 8 workflow prompts over stdio or Streamable HTTP: search, analysis,
 alerts, saved searches, cluster health and configuration.
 
@@ -17,6 +17,7 @@ alerts, saved searches, cluster health and configuration.
 |               | `read_log_message`                       | One message in full                                                     |                    |
 |               | `rank_field_values`                      | Top values from a sample of ≤1000 newest matches                        |                    |
 |               | `discover_fields`                        | Fields with type, and whether groupable or numeric                      |                    |
+|               | `validate_query`                         | Syntax and unknown-field check, without searching                       |                    |
 | Analysis      | `count_matches`                          | Number of hits only                                                     |                    |
 |               | `count_over_time`                        | Histogram, optionally split by a field                                  | 6.3+ (not 5.1)     |
 |               | `exact_field_counts`                     | Exact top values, counted server-side                                   | 5.1+               |

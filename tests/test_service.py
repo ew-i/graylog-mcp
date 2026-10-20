@@ -11,6 +11,8 @@ from graylog_mcp.domain.models import (
     FieldInfo,
     LastSeconds,
     LogEntry,
+    QueryProblem,
+    QueryValidation,
     SearchPage,
     SortDirection,
     Stream,
@@ -493,6 +495,40 @@ class DiscoverFieldsTest(ServiceTestCase):
         # When / Then
         with self.assertRaises(InvalidRequestError):
             self.service.discover_fields(stream_id="", seconds=60)
+
+
+class ValidateQueryTest(ServiceTestCase):
+    def test_given_unknown_field_warning_when_validating_then_reports_it_as_still_valid(self):
+        # Given
+        problem = QueryProblem("UNKNOWN_FIELD", "Query contains unknown field: nosuch", 1, 0)
+        self.store.validation = QueryValidation("WARNING", (problem,))
+
+        # When
+        result = self.service.validate_query(text=" nosuch:x ", stream_id=" s1 ", seconds=60)
+
+        # Then
+        self.assertEqual((result["status"], result["valid"]), ("WARNING", True))
+        self.assertEqual(
+            result["problems"],
+            [{"kind": "UNKNOWN_FIELD", "message": "Query contains unknown field: nosuch", "line": 1, "column": 0}],
+        )
+        self.assertEqual(self.store.validations, [("nosuch:x", "s1", LastSeconds(60))])
+        self.assertEqual(self.store.queries, [])  # no search was sent
+
+    def test_given_parse_error_when_validating_then_reports_it_invalid(self):
+        # Given
+        self.store.validation = QueryValidation("ERROR", (QueryProblem("QUERY_PARSING_ERROR", "x", 1, 5),))
+
+        # When
+        result = self.service.validate_query(text="(a", stream_id="s1", seconds=60)
+
+        # Then
+        self.assertFalse(result["valid"])
+
+    def test_given_blank_query_when_validating_then_rejects_the_request(self):
+        # When / Then
+        with self.assertRaises(InvalidRequestError):
+            self.service.validate_query(text=" ", stream_id="s1", seconds=60)
 
 
 if __name__ == "__main__":

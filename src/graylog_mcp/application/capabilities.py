@@ -26,8 +26,8 @@ _EFFECTS: dict[Capability, tuple[str, str, tuple[str, ...]]] = {
     ),
     Capability.QUERY_VALIDATION: (
         "Query syntax checks without running a search",
-        "a mistyped query shows only as zero results",
-        (),
+        "validate_query returns Unsupported; a mistyped query shows only as zero results",
+        ("validate_query",),
     ),
     Capability.PAGINATED_STREAMS: (
         "Stream listing one page at a time",

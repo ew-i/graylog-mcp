@@ -17,6 +17,8 @@ from ..domain.models import (
     ListingPage,
     LogEntry,
     LogQuery,
+    QueryProblem,
+    QueryValidation,
     SearchPage,
     Stream,
     TimeWindow,
@@ -41,6 +43,7 @@ __all__ = ["GraylogStore", "build_http_client"]
 DEFAULT_STREAM_ID = "000000000000000000000001"
 _OBJECT_ID = re.compile(r"[0-9a-fA-F]{24}")
 _NO_FIELD_TYPES = "this Graylog server has no field-types API"
+_NO_VALIDATION = "this Graylog server has no query-validation API"
 
 _SEARCH_PATHS = {
     LastSeconds: "/api/search/universal/relative",
@@ -183,6 +186,31 @@ class GraylogStore:
                     )
                 )
         return fields
+
+    def validate(self, query: str, stream_id: str, window: TimeWindow) -> QueryValidation:
+        if self._capabilities.known(Capability.QUERY_VALIDATION) is False:
+            raise UnsupportedError(_NO_VALIDATION)
+        try:
+            body = self._api.post_object(
+                "/api/search/validate",
+                {"query": query, "streams": [stream_id], "timerange": timerange_json(window)},
+            )
+        except NotFoundError as exc:
+            if self._capabilities.supports(Capability.QUERY_VALIDATION):
+                raise
+            raise UnsupportedError(_NO_VALIDATION) from exc
+        return QueryValidation(
+            status=text(body.get("status")) or "UNKNOWN",
+            problems=tuple(
+                QueryProblem(
+                    kind=text(item.get("error_type")),
+                    message=text(item.get("error_message")),
+                    line=integer(item.get("begin_line")),
+                    column=integer(item.get("begin_column")),
+                )
+                for item in objects(body.get("explanations"))
+            ),
+        )
 
     @staticmethod
     def _search_params(query: LogQuery) -> dict[str, Any]:

@@ -37,6 +37,7 @@ EXPECTED_TOOLS = {
     "read_log_message",
     "rank_field_values",
     "discover_fields",
+    "validate_query",
     # analytics
     "count_matches",
     "count_over_time",
@@ -71,6 +72,7 @@ STREAM_SCOPED = {
     "find_logs_between",
     "rank_field_values",
     "discover_fields",
+    "validate_query",
     "count_matches",
     "count_over_time",
     "exact_field_counts",
@@ -302,6 +304,7 @@ class McpToolsTest(unittest.TestCase):
                 {"text": "*", "stream_id": "s1", "field": "source", "seconds": 123, "top": 3},
             ),
             "discover_fields": (search, "discover_fields", {"stream_id": "s1", "seconds": 123}),
+            "validate_query": (search, "validate_query", {"text": "*", "stream_id": "s1", "seconds": 123}),
             "count_matches": (
                 analytics,
                 "count_matches",
@@ -451,6 +454,7 @@ class McpToolsTest(unittest.TestCase):
                 "top_n": 3,
             },
             "discover_fields": {"stream_id": "s1", "range_seconds": 123},
+            "validate_query": {"query": "*", "stream_id": "s1", "range_seconds": 123},
             "count_matches": {"query": "*", "stream_id": "s1", "range_seconds": 123},
             "count_over_time": {
                 "query": "*",

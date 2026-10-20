@@ -281,6 +281,67 @@ class FieldTypesTest(unittest.TestCase):
         self.assertRegex(str(raised.exception), "expected a JSON array")
 
 
+class ValidateQueryTest(unittest.TestCase):
+    def test_given_parse_error_reply_when_validating_then_maps_status_and_problems(self):
+        # Given
+        body = {
+            "status": "ERROR",
+            "explanations": [
+                {"error_type": "QUERY_PARSING_ERROR", "error_message": "Cannot parse", "begin_line": 1, "begin_column": 4},
+                "junk",
+            ],
+        }
+        store, rec = store_with(ok(body))
+
+        # When
+        found = store.validate("(a:b", "s1", LastSeconds(60))
+
+        # Then
+        self.assertEqual(rec.requests[0].url.path, "/api/search/validate")
+        self.assertEqual(
+            json.loads(rec.requests[0].content),
+            {"query": "(a:b", "streams": ["s1"], "timerange": {"type": "relative", "range": 60}},
+        )
+        self.assertEqual(found.status, "ERROR")
+        self.assertEqual(
+            [(p.kind, p.message, p.line, p.column) for p in found.problems],
+            [("QUERY_PARSING_ERROR", "Cannot parse", 1, 4)],
+        )
+
+    def test_given_no_validation_endpoint_when_validating_then_raises_unsupported(self):
+        # Given
+        store, _ = store_with(lambda _req: httpx.Response(404))
+
+        # When / Then
+        with self.assertRaises(UnsupportedError):
+            store.validate("*", "s1", LastSeconds(60))
+
+    def test_given_validation_known_missing_when_validating_then_raises_unsupported_without_a_request(self):
+        # Given
+        store, capabilities, rec = remembering_store_with(ok({}))
+        capabilities.record(Capability.QUERY_VALIDATION, False)
+
+        # When
+        with self.assertRaises(UnsupportedError):
+            store.validate("*", "s1", LastSeconds(60))
+
+        # Then
+        self.assertEqual(rec.requests, [])
+
+    def test_given_existing_api_answering_404_when_validating_then_raises_not_found(self):
+        # Given: the probe (no streams) proves the route exists; the query's stream does not.
+        store, _, _ = remembering_store_with(
+            lambda request: httpx.Response(404 if json.loads(request.content).get("streams") else 200, json={})
+        )
+
+        # When
+        with self.assertRaises(NotFoundError) as raised:
+            store.validate("*", "s1", LastSeconds(60))
+
+        # Then
+        self.assertNotIsInstance(raised.exception, UnsupportedError)
+
+
 class SearchTest(unittest.TestCase):
     body = {
         "total_results": 42,

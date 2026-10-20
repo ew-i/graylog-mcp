@@ -176,8 +176,10 @@ The query syntax reference is attached above.
    whether level is a number or a word).
 3. Write the query with those fields. Turn any time in the request into range_seconds,
    or into from_time and to_time for `find_logs_between`.
-4. Test it with `count_matches`. If it matches nothing or far too much, revise it (at
-   most three times) and say what you changed.
+4. Check it with `validate_query` (skip this if it returns Unsupported): fix any
+   ERROR, and any UNKNOWN_FIELD warning unless the field is expected to be rare.
+   Then test it with `count_matches`. If it matches nothing or far too much, revise it
+   (at most three times) and say what you changed.
 5. Show up to three matching messages with `find_recent_logs` (limit=3) so the user
    can check that they are the right ones.
 

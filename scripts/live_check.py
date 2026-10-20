@@ -267,6 +267,15 @@ class Run:
             assert body.get("kind") == "NotFound", body
             return "NotFound"
 
+        def validate() -> str:
+            if self.version < (5, 1):  # not verified before 5.1
+                return "skipped before 5.1"
+            body = self.ok("validate_query", query="nosuchfield:x", stream_id=s)
+            assert body["status"] == "WARNING", body
+            body = self.ok("validate_query", query="(level:3", stream_id=s)
+            assert body["status"] == "ERROR" and not body["valid"], body
+            return "unknown field warns, unbalanced bracket errors"
+
         def count() -> str:
             body = self.ok("count_matches", query=q, stream_id=s, range_seconds=3600)
             assert body["total_results"] == self.sent
@@ -471,6 +480,7 @@ class Run:
             ("Graylog data redactions", graylog_data_redactions),
             ("discover_fields", fields),
             ("discover_fields unknown stream", unknown_stream),
+            ("validate_query", validate),
             ("count_matches", count),
             ("rank_field_values on message", rank),
             ("server_capabilities", capabilities),

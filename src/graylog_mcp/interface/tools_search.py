@@ -113,6 +113,24 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         )
 
     @server.tool()
+    def validate_query(query: str, stream_id: str, range_seconds: int = 86400) -> str:
+        """Check a query's syntax and field names without running a search.
+
+        status is OK, WARNING (e.g. UNKNOWN_FIELD: no message in the window has
+        that field) or ERROR (e.g. QUERY_PARSING_ERROR, with line and column).
+        Use it before count_matches to tell a broken query from one that
+        matches nothing. Returns Unsupported on servers without the API.
+
+        Args:
+            query: Lucene query to check.
+            stream_id: Required. Access is enforced per stream; get IDs from browse_streams.
+            range_seconds: Window whose fields count as known (default 24 h).
+        """
+        return respond(
+            lambda: service.validate_query(text=query, stream_id=stream_id, seconds=range_seconds)
+        )
+
+    @server.tool()
     def read_log_message(index: str, message_id: str, fields: str = "") -> str:
         """Fetch one message in full, using the _index and _id seen in search results.
 

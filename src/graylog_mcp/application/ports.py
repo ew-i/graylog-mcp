@@ -30,6 +30,7 @@ from ..domain.models import (
     ListingQuery,
     LogEntry,
     LogQuery,
+    QueryValidation,
     SearchPage,
     TimeWindow,
 )
@@ -58,6 +59,10 @@ class MessageStore(Protocol):
 
     def field_types(self, stream_id: str, window: TimeWindow) -> list[FieldInfo]:
         """Indexed fields with their capabilities; UnsupportedError without the API."""
+        ...
+
+    def validate(self, query: str, stream_id: str, window: TimeWindow) -> QueryValidation:
+        """Graylog's verdict on a query, without searching; UnsupportedError without the API."""
         ...
 
 
