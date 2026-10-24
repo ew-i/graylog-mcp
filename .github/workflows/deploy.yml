@@ -24,7 +24,7 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: uv sync --locked --dev --python 3.14
+        run: uv sync --locked --dev --python 3.15
 
       - name: PEP 8 and static checks
         run: uv run ruff check --output-format=github src tests
@@ -38,7 +38,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
     steps:
       - uses: actions/checkout@v7
 
@@ -54,13 +54,13 @@ jobs:
         run: uv run pytest --cov=src/graylog_mcp --cov-report=term-missing --cov-report=xml:coverage.xml --cov-fail-under=100
 
       - name: Make code coverage badge
-        if: matrix.python-version == '3.14'
+        if: matrix.python-version == '3.15'
         run: |
           mkdir -p output
           uv run genbadge coverage -i coverage.xml -o output/coverage.svg
 
       - name: Publish coverage badge
-        if: matrix.python-version == '3.14' && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        if: matrix.python-version == '3.15' && github.event_name == 'push' && github.ref == 'refs/heads/main'
         env:
           BADGE_TOKEN: ${{ secrets.BADGE_TOKEN }}
         run: |
@@ -85,7 +85,7 @@ jobs:
 
       - uses: astral-sh/setup-uv@v10.3.0
         with:
-          python-version: "3.14"
+          python-version: "3.15"
           enable-cache: true
 
       - name: Build sdist and wheel

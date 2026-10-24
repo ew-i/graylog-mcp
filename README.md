@@ -4,7 +4,7 @@ Read-only Graylog access exposed as 30 MCP tools, 8 MCP resources, one resource
 template and 8 workflow prompts over stdio or Streamable HTTP: search, analysis,
 alerts, saved searches, cluster health and configuration.
 
-[![build](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml) [![coverage](https://raw.githubusercontent.com/ew-i/badges/main/graylog-mcp/coverage.svg)](https://github.com/ew-i/graylog-mcp) [![codeql](https://github.com/ew-i/graylog-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/codeql.yml) ![Python](https://img.shields.io/badge/python-3.10_%E2%80%93_3.14-yellow?labelColor=blue) ![Graylog](https://img.shields.io/badge/graylog-5.1_%E2%80%93_7.1-08c2fd)
+[![build](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/deploy.yml) [![coverage](https://raw.githubusercontent.com/ew-i/badges/main/graylog-mcp/coverage.svg)](https://github.com/ew-i/graylog-mcp) [![codeql](https://github.com/ew-i/graylog-mcp/actions/workflows/codeql.yml/badge.svg)](https://github.com/ew-i/graylog-mcp/actions/workflows/codeql.yml) ![Python](https://img.shields.io/badge/python-3.11_%E2%80%93_3.15-yellow?labelColor=blue) ![Graylog](https://img.shields.io/badge/graylog-5.1_%E2%80%93_7.2-08c2fd)
 
 ## Tools
 
@@ -40,7 +40,7 @@ alerts, saved searches, cluster health and configuration.
 
 **5.1+** tools use Graylog's Search Scripting API. On older servers they return
 `{"kind": "Unsupported", ...}`; the rest keep working. `count_over_time` also needs
-time grouping, which the 5.1 API lacks; it is verified on 6.3 and 7.1 (5.2 to 6.2
+time grouping, which the 5.1 API lacks; it is verified on 6.3 and 7.2 (5.2 to 6.2
 are untested). `server_capabilities` checks each optional API on the connected
 server (one request each, none runs a search) and lists the tools that return
 `Unsupported` there. Once an API is known to be missing, tools that need it answer
@@ -436,13 +436,13 @@ login admin / admin:
 |---------|--------------------------|-------------------------------|
 | `5.1`   | `http://localhost:29000` | `http://localhost:29001/gelf` |
 | `6.3`   | `http://localhost:39000` | `http://localhost:39001/gelf` |
-| `7.1`   | `http://localhost:49000` | `http://localhost:49001/gelf` |
+| `7.2`   | `http://localhost:49000` | `http://localhost:49001/gelf` |
 
 ```bash
-python scripts/live/stack.py up 7.1
+python scripts/live/stack.py up 7.2
 uv run python scripts/live_check.py --base-url http://localhost:49000 \
     --user admin --password admin --gelf-url http://localhost:49001/gelf
-python scripts/live/stack.py down 7.1
+python scripts/live/stack.py down 7.2
 ```
 
 Against your own server, pass `--api-token`, your GELF HTTP input URL and the
@@ -466,7 +466,7 @@ claude plugin install ponytail@ponytail --scope project    # run in the repo roo
 `.github/workflows/deploy.yml` runs on pushes to `main` and manual dispatch:
 
 1. **lint**: `ruff check` (findings annotate the PR) and `ruff format --check`
-2. **test**: `pytest` on Python 3.10–3.14, plus a check that the server wires up all 29 tools
+2. **test**: `pytest` on Python 3.11–3.15, plus a check that the server wires up all 29 tools
 3. **build**: builds the sdist and wheel once lint and tests pass, and uploads them as the `dist` artifact
 
 `.github/workflows/codeql.yml` runs CodeQL on the same triggers and weekly, for the

@@ -23,7 +23,7 @@ COMPOSE = Path(__file__).with_name("compose.yml")
 STACKS = {
     "5.1": {"MONGO_VERSION": "6.0", "OPENSEARCH_VERSION": "2.4.1", "port": 29000},
     "6.3": {"MONGO_VERSION": "7.0", "OPENSEARCH_VERSION": "2.15.0", "port": 39000},
-    "7.1": {"MONGO_VERSION": "7.0", "OPENSEARCH_VERSION": "2.19.6", "port": 49000},
+    "7.2": {"MONGO_VERSION": "7.0", "OPENSEARCH_VERSION": "2.19.6", "port": 49000},
 }
 AUTH = "Basic " + base64.b64encode(b"admin:admin").decode()
 GELF_INPUT = "org.graylog2.inputs.gelf.http.GELFHttpInput"
