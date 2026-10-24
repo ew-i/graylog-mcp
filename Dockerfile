@@ -28,7 +28,8 @@ RUN uv sync --locked --no-dev --no-editable
 
 FROM base
 
-RUN adduser -u 1000 -G root -D mcp
+RUN python -m pip uninstall -y pip \
+    && adduser -u 1000 -G root -D mcp
 
 # Same path as the builder: the venv's interpreter symlinks and scripts are absolute.
 COPY --from=builder /app/.venv /app/.venv

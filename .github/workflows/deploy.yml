@@ -76,6 +76,33 @@ jobs:
           git commit -m "Update graylog-mcp coverage badge" || exit 0
           git -c credential.helper="$helper" push
 
+  image-scan:
+    name: Scan image (Trivy)
+    needs: [lint, test]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t graylog-mcp:${{ github.sha }} .
+
+      # pinned by SHA: trivy-action tags were hijacked in March 2026
+      - uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: graylog-mcp:${{ github.sha }}
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          format: sarif
+          output: trivy.sarif
+
+      - uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: trivy.sarif
+          category: trivy-image
+
   build:
     name: Build package
     needs: [lint, test]
