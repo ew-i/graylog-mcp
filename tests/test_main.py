@@ -75,7 +75,7 @@ class CompositionRootTest(unittest.TestCase):
 
         # Then
         self.assertEqual(settings.base_url, "https://from-cli.example")
-        self.assertEqual(settings.api_token, "cli-token")
+        self.assertEqual(settings.api_token.get_secret_value(), "cli-token")
         self.assertFalse(settings.verify_tls)
         self.assertEqual(settings.timeout_seconds, 5.0)
         self.assertEqual(settings.log_level, "DEBUG")
@@ -128,7 +128,7 @@ class CompositionRootTest(unittest.TestCase):
 
         # Then
         self.assertEqual(settings.base_url, "https://gl.example")
-        self.assertEqual(settings.api_token, "token")
+        self.assertEqual(settings.api_token.get_secret_value(), "token")
 
     def test_given_invalid_environment_value_when_parsing_then_raises_config_error_naming_it(self):
         # Given

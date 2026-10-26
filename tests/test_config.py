@@ -70,7 +70,7 @@ class SettingsTest(unittest.TestCase):
 
         # Then
         self.assertEqual(settings.base_url, "https://from-environment.example")
-        self.assertEqual(settings.api_token, "environment-token")
+        self.assertEqual(settings.api_token.get_secret_value(), "environment-token")
         self.assertEqual(settings.log_level, "WARNING")
 
     def test_given_http_url_when_loading_then_needs_explicit_insecure_opt_in(self):

@@ -134,7 +134,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             wire(http, settings.resource_cache_seconds),
             log_level=settings.log_level,
             resource_cache_seconds=settings.resource_cache_seconds,
-            redactor=Redactor(settings.redact_field_names(), secrets=(settings.api_token,)),
+            redactor=Redactor(
+                settings.redact_field_names(), secrets=(settings.api_token.get_secret_value(),)
+            ),
         )
         if settings.transport == "streamable-http":
             server.run(

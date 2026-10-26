@@ -33,7 +33,10 @@ from typing import Any
 import httpx
 
 from graylog_mcp.cli import wire
+from graylog_mcp.infrastructure.config import Settings
+from graylog_mcp.infrastructure.graylog_api import build_http_client
 from graylog_mcp.interface.mcp_tools import build_server
+from graylog_mcp.interface.redaction import Redactor
 
 ALL_MESSAGES = "000000000000000000000001"  # where a fresh server routes GELF messages
 # Search Scripting time grouping: 5.1 rejects `timeunit`, 6.3 and 7.1 support it;
@@ -49,15 +52,25 @@ Check = Callable[[], str]  # returns a detail line; raises AssertionError on fai
 
 class Run:
     def __init__(self, args: argparse.Namespace) -> None:
-        auth = (args.api_token, "token") if args.api_token else (args.user, args.password)
-        self.http = httpx.Client(
-            base_url=args.base_url.rstrip("/"),
-            auth=auth,
-            headers={"Accept": "application/json", "X-Requested-By": "live-check"},
-            timeout=30,
-            verify=not args.no_verify_tls,
-        )
-        self.server = build_server(wire(self.http))
+        if args.api_token:
+            settings = Settings(
+                base_url=args.base_url,
+                api_token=args.api_token,
+                verify_tls=not args.no_verify_tls,
+                allow_insecure_http=True,
+            ).validated()
+            self.http = build_http_client(settings)
+            redactor = Redactor(secrets=(settings.api_token.get_secret_value(),))
+        else:
+            self.http = httpx.Client(
+                base_url=args.base_url.rstrip("/"),
+                auth=(args.user, args.password),
+                headers={"Accept": "application/json", "X-Requested-By": "live-check"},
+                timeout=30,
+                verify=not args.no_verify_tls,
+            )
+            redactor = None
+        self.server = build_server(wire(self.http), redactor=redactor)
         self.stream = args.stream_id
         self.gelf_url = args.gelf_url
         self.run_id = f"run{int(time.time())}"

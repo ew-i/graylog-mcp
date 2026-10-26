@@ -22,7 +22,7 @@ def build_http_client(settings: Settings) -> httpx.Client:
     """Graylog tokens are sent as basic-auth username with password 'token'."""
     return httpx.Client(
         base_url=settings.base_url,
-        auth=(settings.api_token, "token"),
+        auth=(settings.api_token.get_secret_value(), "token"),
         headers={"Accept": "application/json", "X-Requested-By": "graylog-mcp"},
         timeout=settings.timeout_seconds,
         verify=settings.verify_tls,

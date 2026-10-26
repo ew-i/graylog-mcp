@@ -8,6 +8,7 @@ from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import (
     Field,
     PositiveFloat,
+    SecretStr,
     ValidationError,
     ValidationInfo,
     field_validator,
@@ -38,7 +39,7 @@ class Settings(BaseSettings):
     )
 
     base_url: str = ""
-    api_token: str = ""
+    api_token: SecretStr = SecretStr("")
     verify_tls: bool = True
     allow_insecure_http: bool = False
     timeout_seconds: PositiveFloat = 30.0
@@ -68,8 +69,8 @@ class Settings(BaseSettings):
         mode="before",
     )
     @classmethod
-    def strip_strings(cls, value: str) -> str:
-        return value.strip()
+    def strip_strings(cls, value: object) -> object:
+        return value.strip() if isinstance(value, str) else value
 
     @field_validator(
         "verify_tls", "allow_insecure_http", "enable_dns_rebinding_protection", mode="before"
@@ -100,7 +101,7 @@ class Settings(BaseSettings):
     def validated(self) -> Settings:
         """Apply checks that depend on more than one setting."""
         base_url = self.base_url.rstrip("/")
-        token = self.api_token
+        token = self.api_token.get_secret_value()
         missing = [
             n for n, v in (("GRAYLOG_BASE_URL", base_url), ("GRAYLOG_API_TOKEN", token)) if not v
         ]
@@ -113,7 +114,7 @@ class Settings(BaseSettings):
                 "GRAYLOG_BASE_URL must use https://; set GRAYLOG_ALLOW_INSECURE_HTTP=true "
                 "only for local development"
             )
-        return self.model_copy(update={"base_url": base_url, "api_token": token})
+        return self.model_copy(update={"base_url": base_url})
 
     def transport_security_settings(self) -> TransportSecuritySettings:
         """Build the SDK security policy from comma-separated CLI/environment values."""
