@@ -12,7 +12,7 @@ services:
     restart: "no"
     environment:
       discovery.type: single-node
-      OPENSEARCH_JAVA_OPTS: -Xms512m -Xmx512m
+      OPENSEARCH_JAVA_OPTS: -Xms256m -Xmx256m
       DISABLE_SECURITY_PLUGIN: "true"
       DISABLE_INSTALL_DEMO_CONFIG: "true"
       action.auto_create_index: "false"
@@ -31,7 +31,7 @@ services:
       GRAYLOG_HTTP_EXTERNAL_URI: http://localhost:${WEB_PORT}/
       GRAYLOG_ELASTICSEARCH_HOSTS: http://opensearch:9200
       GRAYLOG_MONGODB_URI: mongodb://mongodb:27017/graylog
-      GRAYLOG_SERVER_JAVA_OPTS: -Xms512m -Xmx512m
+      GRAYLOG_SERVER_JAVA_OPTS: -Xms384m -Xmx384m
     ports:
       - 127.0.0.1:${WEB_PORT}:9000
       - 127.0.0.1:${GELF_PORT}:12201
