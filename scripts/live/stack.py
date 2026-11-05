@@ -3,8 +3,9 @@
 usage: python scripts/live/stack.py up|down VERSION
 
 `up` starts Graylog VERSION with MongoDB and OpenSearch, waits until the API
-answers, and creates a global GELF HTTP input. The stack listens on localhost
-only, with the test login admin / admin. `down` removes it with its volumes.
+answers, and creates a global GELF HTTP input and a user who can read only the
+default stream. The stack listens on localhost only, with the test login
+admin / admin. `down` removes it with its volumes.
 """
 
 from __future__ import annotations
@@ -23,10 +24,12 @@ COMPOSE = Path(__file__).with_name("compose.yml")
 STACKS = {
     "5.1": {"MONGO_VERSION": "6.0", "OPENSEARCH_VERSION": "2.4.1", "port": 29000},
     "6.3": {"MONGO_VERSION": "7.0", "OPENSEARCH_VERSION": "2.15.0", "port": 39000},
-    "7.2": {"MONGO_VERSION": "7.0", "OPENSEARCH_VERSION": "2.19.6", "port": 49000},
+    "7.1": {"MONGO_VERSION": "7.0", "OPENSEARCH_VERSION": "2.19.6", "port": 49000},
+    "7.2": {"MONGO_VERSION": "7.0", "OPENSEARCH_VERSION": "2.19.6", "port": 59000},
 }
 AUTH = "Basic " + base64.b64encode(b"admin:admin").decode()
 GELF_INPUT = "org.graylog2.inputs.gelf.http.GELFHttpInput"
+READER = ("reader", "reader-password-1")
 
 
 def settings(version: str) -> dict[str, str]:
@@ -91,6 +94,30 @@ def ensure_gelf_input(base: str) -> None:
     )
 
 
+def ensure_reader(base: str) -> None:
+    """A user who may read the default stream and nothing else."""
+    try:
+        api(base, "GET", f"/api/users/{READER[0]}")
+        return
+    except urllib.error.HTTPError as exc:
+        if exc.code != 404:
+            raise
+    api(
+        base,
+        "POST",
+        "/api/users",
+        {
+            "username": READER[0],
+            "password": READER[1],
+            "email": "reader@live-check.invalid",
+            "first_name": "Live",
+            "last_name": "Reader",
+            "roles": ["Reader"],
+            "permissions": ["streams:read:000000000000000000000001"],
+        },
+    )
+
+
 def main(action: str, version: str) -> None:
     if version not in STACKS:
         raise SystemExit(f"unknown version {version}; choose from {', '.join(STACKS)}")
@@ -105,9 +132,11 @@ def main(action: str, version: str) -> None:
     base = f"http://localhost:{env['WEB_PORT']}"
     running = wait_ready(base)
     ensure_gelf_input(base)
+    ensure_reader(base)
     print(
         f"Graylog {running} ready: --base-url {base} --user admin --password admin "
-        f"--gelf-url http://localhost:{env['GELF_PORT']}/gelf"
+        f"--gelf-url http://localhost:{env['GELF_PORT']}/gelf "
+        f"--reader {READER[0]}:{READER[1]}"
     )
 
 

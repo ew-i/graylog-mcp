@@ -172,6 +172,16 @@ class ReadEndpointsTest(unittest.TestCase):
         self.assertEqual(entry.index, "idx")
         self.assertEqual(rec.requests[0].url.raw_path, b"/api/messages/idx/m%2F1")
 
+    def test_given_a_refused_or_missing_message_when_fetching_then_the_error_names_the_permission_cause(self):
+        for status, error, hint in ((404, NotFoundError, "may not read it"), (403, AccessDeniedError, "indices:read")):
+            with self.subTest(status=status):
+                # Given
+                store, _ = store_with(lambda request, s=status: httpx.Response(s, json={}))
+
+                # When / Then
+                with self.assertRaisesRegex(error, hint):
+                    store.fetch("idx", "m1")
+
     def test_given_flat_message_shape_when_fetching_then_uses_the_fields_as_is(self):
         # Given
         store, _ = store_with(ok({"message": {"_id": "m1", "msg": "x"}}))

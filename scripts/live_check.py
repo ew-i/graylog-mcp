@@ -31,6 +31,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
+from mcp.server.mcpserver import MCPServer
 
 from graylog_mcp.cli import wire
 from graylog_mcp.infrastructure.config import Settings
@@ -71,6 +72,17 @@ class Run:
             )
             redactor = None
         self.server = build_server(wire(self.http), redactor=redactor)
+        self.reader: MCPServer | None = None
+        if args.reader:
+            user, _, password = args.reader.partition(":")
+            reader_http = httpx.Client(
+                base_url=args.base_url.rstrip("/"),
+                auth=(user, password),
+                headers={"Accept": "application/json", "X-Requested-By": "live-check"},
+                timeout=30,
+                verify=not args.no_verify_tls,
+            )
+            self.reader = build_server(wire(reader_http), redactor=redactor)
         self.stream = args.stream_id
         self.gelf_url = args.gelf_url
         self.run_id = f"run{int(time.time())}"
@@ -82,6 +94,9 @@ class Run:
         self.bearer = f"bearer{self.run_id}abcdefghijklmnop"
         self.github = f"ghp_{self.run_id}abcdefghijklmnop"
         self.sessions = [f"{self.run_id}-session-{n}" for n in range(SESSIONS)]
+        # Values with spaces, one a prefix of the other: 7.2 changed space escaping
+        # (graylog2-server#27029).
+        self.customers = (f"ACME Corp {self.run_id}", f"ACME Corp {self.run_id} EU")
         self.planted = {
             self.password,
             self.db_password,
@@ -92,8 +107,8 @@ class Run:
 
     # -- MCP calls -----------------------------------------------------------
 
-    def tool(self, name: str, **arguments: Any) -> dict:
-        result = asyncio.run(self.server.call_tool(name, arguments))
+    def tool(self, name: str, server: MCPServer | None = None, **arguments: Any) -> dict:
+        result = asyncio.run((server or self.server).call_tool(name, arguments))
         text = result.content[0].text
         self.assert_redacted(name, text)
         return json.loads(text)
@@ -135,6 +150,7 @@ class Run:
                 "_duration_ms": 100 + i * 10,
                 "_request_id": f"{self.run_id}-{i}",
                 "_live_check": self.run_id,
+                "_customer": self.customers[i % 2],
                 **({"_error_type": error_type} if error_type else {}),
                 # Planted credentials: redaction must hide them in every output.
                 "_password": self.password,
@@ -194,6 +210,46 @@ class Run:
             )
             assert body["anchor"].get("_id") == m["_id"]
             return f"{len(body['before'])} before, {len(body['after'])} after"
+
+        def spaced_values() -> str:
+            m = found["error"]
+            body = self.ok(
+                "message_context",
+                index=m["_index"],
+                message_id=m["_id"],
+                stream_id=s,
+                context_field="customer",
+                before=self.sent,
+                after=self.sent,
+                window_seconds=3600,
+            )
+            neighbours = body["before"] + body["after"]
+            assert all(n.get("customer") == m["customer"] for n in neighbours), neighbours
+            assert len(neighbours) == self.sent // len(self.customers) - 1, len(neighbours)
+            # How a model writes a stream rule's value with a space: as a phrase or escaped.
+            name = self.customers[0]
+            for value in (f'"{name}"', name.replace(" ", "\\ ")):
+                total = self.ok("count_matches", query=f"{q} AND customer:{value}", stream_id=s)[
+                    "total_results"
+                ]
+                assert total == self.sent // len(self.customers), f"customer:{value} -> {total}"
+            return f"{len(neighbours)} neighbours share {m['customer']!r}; phrase and \\ match"
+
+        def reader_reads() -> str:
+            if self.reader is None:
+                return "skipped: no --reader"
+            m = found["error"]
+            body = self.tool(
+                "read_log_message", self.reader, index=m["_index"], message_id=m["_id"]
+            )
+            if self.version >= (7, 2):
+                assert "error" not in body, body
+            missing = self.tool(
+                "read_log_message", self.reader, index=m["_index"], message_id="nope"
+            )
+            assert missing.get("kind") == "NotFound", missing
+            read = "read" if "error" not in body else f"{body['kind']}: {body['error']}"
+            return f"stream-only reader: {read}"
 
         def redacted_search() -> str:
             body = self.ok("find_recent_logs", query=q, stream_id=s, range_seconds=3600, limit=1)
@@ -486,6 +542,8 @@ class Run:
             ("find_logs_between", between),
             ("read_log_message", read_message),
             ("message_context", context),
+            ("values with spaces", spaced_values),
+            ("read_log_message as stream reader", reader_reads),
             ("redacted search results", redacted_search),
             ("rank_field_values masks session_id", masked_rank),
             ("exact_field_counts masks (5.1+)", masked_exact),
@@ -529,6 +587,7 @@ def main() -> int:
     parser.add_argument("--password", default="admin")
     parser.add_argument("--gelf-url", required=True)
     parser.add_argument("--stream-id", default=ALL_MESSAGES)
+    parser.add_argument("--reader", help="USER:PASSWORD of a user who may read only the stream")
     parser.add_argument("--no-verify-tls", action="store_true")
     args = parser.parse_args()
     logging.disable(logging.CRITICAL)

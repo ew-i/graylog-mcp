@@ -8,7 +8,7 @@ from typing import Any
 import httpx
 
 from ..domain.capabilities import Capability
-from ..domain.errors import NotFoundError, UnsupportedError
+from ..domain.errors import AccessDeniedError, NotFoundError, UnsupportedError
 from ..domain.models import (
     Between,
     ClusterInfo,
@@ -152,12 +152,22 @@ class GraylogStore:
         )
 
     def fetch(self, index: str, message_id: str) -> LogEntry:
-        return LogEntry(
-            _unwrap_single(
-                self._api.get_object(f"/api/messages/{segment(index)}/{segment(message_id)}")
-            ),
-            index=index,
-        )
+        try:
+            body = self._api.get_object(f"/api/messages/{segment(index)}/{segment(message_id)}")
+        except NotFoundError as exc:
+            raise NotFoundError(
+                f"Graylog found no message {message_id!r} in index {index!r}, or the token may "
+                "not read it (current Graylog answers both the same way); pass the _index and "
+                "_id of a search result from a stream the token can read"
+            ) from exc
+        except AccessDeniedError as exc:
+            # graylog2-server#26565 required indices:read in a few patch releases; #26657 undid it
+            raise AccessDeniedError(
+                f"Graylog refused to read message {message_id!r} in index {index!r}; the token "
+                "needs read access to a stream holding it (some mid-2026 patch releases, such as "
+                f"7.1.5, also require indices:read on {index!r}; upgrading fixes that)"
+            ) from exc
+        return LogEntry(_unwrap_single(body), index=index)
 
     def field_types(self, stream_id: str, window: TimeWindow) -> list[FieldInfo]:
         if self._capabilities.known(Capability.FIELD_TYPES) is False:
