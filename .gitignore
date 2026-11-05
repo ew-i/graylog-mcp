@@ -224,3 +224,7 @@ __marimo__/
 .vscode/
 /graphify-out
 /opencode.json
+node_modules
+package.json
+package-lock.json
+bun.lock
