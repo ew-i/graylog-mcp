@@ -286,6 +286,19 @@ class AlertServiceTest(unittest.TestCase):
         # Then
         self.assertEqual(result["matching_messages"], [{"stream_id": "s1", "error": "no", "kind": "AccessDenied"}])
 
+    def test_given_event_without_definition_or_window_when_getting_details_then_searches_nothing(self):
+        # Given
+        event = Event("01JJ", None, None, "t", "m", 1, True, None, None, {}, source_streams=("s1",))
+        self.store.page = EventPage(1, (event,), 1)
+
+        # When
+        result = self.service.alert_details(event_id="01JJ")
+
+        # Then
+        self.assertNotIn("definition", result)
+        self.assertEqual(result["matching_messages"], [])
+        self.assertEqual(self.logs.queries, [])
+
     def test_given_nearby_events_when_finding_related_then_keeps_same_definition_or_group_by(self):
         # Given
         def ev(event_id, definition_id, group_by):
