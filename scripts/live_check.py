@@ -13,7 +13,9 @@ usage (from the repository root):
   uv run python scripts/live_check.py --base-url http://localhost:19000 \\
       --api-token TOKEN --gelf-url http://localhost:12201/gelf --stream-id STREAM
 
-A throwaway server: `python scripts/live/stack.py up 5.1`.
+A throwaway server: `python scripts/live/stack.py up 5.1`. On a throwaway server
+add `--create-alerts`: it creates two event definitions scoped to the run (one
+filter, one aggregation by source) so the alert tools have real events to read.
 """
 
 from __future__ import annotations
@@ -43,6 +45,9 @@ ALL_MESSAGES = "000000000000000000000001"  # where a fresh server routes GELF me
 # Search Scripting time grouping: 5.1 rejects `timeunit`, 6.3 and 7.1 support it;
 # 5.2 to 6.2 are untested, so (6, 0) is an assumption to confirm.
 TIME_GROUPING_SINCE = (6, 0)
+# Event definitions: 5.1 wants `function` series and rejects `event_limit`; 6.3 and 7.x
+# take `type` series and 7.x filters require `event_limit`. (6, 0) is an assumption.
+TYPED_SERIES_SINCE = (6, 0)
 ERRORS = "level:3"
 REDACTED = "[REDACTED]"
 PLACEHOLDER = re.compile(r"\[REDACTED-\d+\]")
@@ -85,6 +90,7 @@ class Run:
             self.reader = build_server(wire(reader_http), redactor=redactor)
         self.stream = args.stream_id
         self.gelf_url = args.gelf_url
+        self.definitions: dict[str, str] = {}  # "filter"/"aggregation" -> ID, with --create-alerts
         self.run_id = f"run{int(time.time())}"
         self.query = f"live_check:{self.run_id}"
         self.version: tuple[int, int] = (0, 0)
@@ -132,6 +138,63 @@ class Run:
         return body
 
     # -- fixtures ------------------------------------------------------------
+
+    def create_alert_definitions(self) -> None:
+        """A filter and a per-source aggregation over this run's errors. Their 15-minute
+        window covers the fixtures, which are timestamped up to 10 minutes back."""
+        typed = self.version >= TYPED_SERIES_SINCE
+        count = {"id": "count-", "type" if typed else "function": "count"}
+        above_zero = {
+            "expression": {
+                "expr": ">",
+                "left": {"expr": "number-ref", "ref": "count-"},
+                "right": {"expr": "number", "value": 0},
+            }
+        }
+        shapes = {
+            "filter": ([], [], {"expression": None}),
+            "aggregation": (["source"], [count], above_zero),
+        }
+        for kind, (group_by, series, conditions) in shapes.items():
+            definition = {
+                "title": f"live check {kind} {self.run_id}",
+                "description": "",
+                "priority": 2,
+                "alert": True,
+                "config": {
+                    "type": "aggregation-v1",
+                    "query": f"{self.query} AND {ERRORS}",
+                    "query_parameters": [],
+                    "streams": [self.stream],
+                    "group_by": group_by,
+                    "series": series,
+                    "conditions": conditions,
+                    "search_within_ms": 900_000,
+                    "execute_every_ms": 60_000,
+                    **({"event_limit": 100} if typed else {}),
+                },
+                "field_spec": {},
+                "key_spec": [],
+                "notification_settings": {"grace_period_ms": 0, "backlog_size": 0},
+                "notifications": [],
+            }
+            reply = self.http.post("/api/events/definitions", json=definition)
+            if reply.status_code == 400 and "CreateEntityRequest" in reply.text:  # Graylog 7
+                reply = self.http.post("/api/events/definitions", json={"entity": definition})
+            reply.raise_for_status()
+            self.definitions[kind] = reply.json()["id"]
+
+    def wait_for_events(self, definition_id: str, timeout: float = 240) -> list[dict]:
+        deadline = time.monotonic() + timeout
+        while True:
+            events = self.ok("recent_alerts", range_seconds=3600, definition_id=definition_id)[
+                "events"
+            ]
+            if events:
+                return events
+            if time.monotonic() > deadline:
+                raise AssertionError(f"definition {definition_id} raised no event in time")
+            time.sleep(10)
 
     def send_fixtures(self) -> None:
         now = time.time()
@@ -190,6 +253,7 @@ class Run:
             assert body["returned"] == self.sent, f"returned {body['returned']}"
             assert all("_index" in m and "_id" in m for m in body["messages"])
             found["error"] = next(m for m in body["messages"] if m.get("level") == 3)
+            found["messages"] = body["messages"]
             return f"{body['returned']} messages, each with _index and _id"
 
         def read_message() -> str:
@@ -511,6 +575,46 @@ class Run:
             body = self.ok("run_saved_search", view_id=searches[0]["id"], stream_id=s, limit=1)
             return f"ran {searches[0]['title']!r}: {body['result']['total_results']} results"
 
+        def alert_details() -> str:
+            if not self.definitions:
+                body = self.tool("alert_details", event_id="01AAAAAAAAAAAAAAAAAAAAAAAA")
+                assert body.get("kind") == "NotFound", body
+                return "no --create-alerts; unknown ID gives NotFound"
+            errors = [m for m in found["messages"] if m.get("level") == 3]
+
+            [fired, *_] = self.wait_for_events(self.definitions["filter"])
+            origin = fired["origin_message"]
+            assert origin and origin["_id"] in {m["_id"] for m in errors}, fired
+            body = self.ok("alert_details", event_id=fired["id"])
+            assert body["definition"]["query"] == f"{q} AND {ERRORS}", body["definition"]
+            assert body["originating_message"]["live_check"] == self.run_id, body
+            [matching] = body["matching_messages"]
+            assert origin["_id"] in {m["_id"] for m in matching["messages"]}, matching
+
+            events = self.wait_for_events(self.definitions["aggregation"])
+            agg = events[0]
+            source = agg["group_by_fields"].get("source")
+            assert agg["timerange"] and source, agg
+            body = self.ok("alert_details", event_id=agg["id"])
+            assert "originating_message" not in body, body
+            [matching] = body["matching_messages"]
+            want = sum(m.get("source") == source for m in errors)
+            assert matching["total_results"] == want, (
+                matching["query"],
+                matching["total_results"],
+                want,
+            )
+
+            related = self.ok("find_related_alerts", event_id=agg["id"])
+            assert all(r["related_by"] for r in related["related"]), related
+            hosts = {e["group_by_fields"].get("source") for e in events}
+            if len(hosts) > 1:  # the other host's event shares the definition
+                assert any("same definition" in r["related_by"] for r in related["related"])
+            return (
+                f"filter origin read and matched; aggregation {source}: {want} messages; "
+                f"{related['total']} related"
+            )
+
         def lookup() -> str:
             tables = self.ok("lookup_tables", limit=1)["lookup_tables"]
             if not tables:
@@ -539,6 +643,7 @@ class Run:
         ]
         return [
             ("search with _index/_id", search),
+            ("alert_details / find_related_alerts", alert_details),
             ("find_logs_between", between),
             ("read_log_message", read_message),
             ("message_context", context),
@@ -589,6 +694,11 @@ def main() -> int:
     parser.add_argument("--stream-id", default=ALL_MESSAGES)
     parser.add_argument("--reader", help="USER:PASSWORD of a user who may read only the stream")
     parser.add_argument("--no-verify-tls", action="store_true")
+    parser.add_argument(
+        "--create-alerts",
+        action="store_true",
+        help="create two event definitions for this run (throwaway servers only)",
+    )
     args = parser.parse_args()
     logging.disable(logging.CRITICAL)
 
@@ -596,6 +706,8 @@ def main() -> int:
     version = run.ok("cluster_status")["version"]
     run.version = tuple(int(p) for p in re.findall(r"\d+", version)[:2])
     print(f"Graylog {version}, stream {run.stream}, fixtures tagged {run.query}")
+    if args.create_alerts:
+        run.create_alert_definitions()
     run.send_fixtures()
     run.wait_searchable()
 

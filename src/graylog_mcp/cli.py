@@ -39,7 +39,7 @@ def wire(http: httpx.Client, cache_seconds: float = CACHE_SECONDS) -> ServiceBun
     return ServiceBundle(
         search=search,
         analytics=AnalyticsService(logs, GraylogAnalyticsStore(http, capabilities)),
-        alerts=AlertService(GraylogAlertStore(http)),
+        alerts=AlertService(GraylogAlertStore(http), search),
         views=SavedViewService(GraylogViewStore(http), search),
         operations=OperationsService(GraylogSystemStore(http)),
         configuration=ConfigurationService(GraylogConfigStore(http)),

@@ -21,7 +21,7 @@ from graylog_mcp.domain.configuration import (
     StreamConfig,
     StreamRule,
 )
-from graylog_mcp.domain.errors import InvalidRequestError, NotFoundError
+from graylog_mcp.domain.errors import AccessDeniedError, InvalidRequestError, NotFoundError
 from graylog_mcp.domain.models import Between, LastSeconds, ListingPage, ListingQuery
 from graylog_mcp.domain.operations import (
     InputNodeState,
@@ -47,7 +47,8 @@ NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
 class AlertServiceTest(unittest.TestCase):
     def setUp(self):
         self.store = FakeAlertStore()
-        self.service = AlertService(self.store, clock=lambda: NOW)
+        self.logs = FakeLogStore()
+        self.service = AlertService(self.store, LogService(self.logs, clock=lambda: NOW), clock=lambda: NOW)
 
     def test_given_event_when_listing_recent_alerts_then_builds_query_and_shapes_event(self):
         # Given
@@ -152,6 +153,165 @@ class AlertServiceTest(unittest.TestCase):
         # Then
         self.assertEqual([item["id"] for item in first["definitions"] + second["definitions"]], ["d1", "d2"])
         self.assertFalse(second["has_more"])
+
+    def test_given_aggregation_event_when_getting_details_then_searches_its_window_and_group_by(self):
+        # Given
+        event = Event(
+            "01JE",
+            "d1",
+            None,
+            "2026-10-07T12:00:00.000Z",
+            "too many",
+            3,
+            True,
+            None,
+            "web-1",
+            {},
+            timerange_start="2026-10-07 11:55:00.000",
+            timerange_end="2026-10-07T12:00:00.000Z",
+            source_streams=("s1",),
+            group_by_fields={"source": 'web "1"'},
+        )
+        self.store.page = EventPage(1, (event,), 1)
+        self.store.definition_list = [
+            EventDefinition("d1", "Errors", None, 3, True, "aggregation-v1", "level:3", ("s9",), 300000, 60000)
+        ]
+        self.logs.entries = [{"message": "boom"}]
+
+        # When
+        result = self.service.alert_details(event_id=" 01JE ", limit=5)
+
+        # Then
+        q = self.logs.last_query
+        self.assertEqual((q.text, q.stream_id), ('(level:3) AND source:"web \\"1\\""', "s1"))
+        self.assertEqual(q.window, Between("2026-10-07T11:55:00.000Z", "2026-10-07T12:00:00.000Z"))
+        self.assertEqual((result["event"]["title"], result["definition"]["query"]), ("Errors", "level:3"))
+        self.assertNotIn("originating_message", result)
+        self.assertEqual(result["matching_messages"][0]["total_results"], 1)
+
+    def test_given_filter_event_when_getting_details_then_reads_origin_and_searches_up_to_it(self):
+        # Given
+        event = Event(
+            "01JF",
+            "d1",
+            "t",
+            "2026-10-07T12:00:00.000Z",
+            "m",
+            2,
+            True,
+            None,
+            None,
+            {},
+            origin_context="urn:graylog:message:es:graylog_1:m1",
+        )
+        self.store.page = EventPage(1, (event,), 1)
+        self.store.definition_list = [EventDefinition("d1", "t", None, 2, True, "aggregation-v1", "", ("s1",), 60000, None)]
+        self.logs.stored[("graylog_1", "m1")] = {"message": "fired"}
+
+        # When
+        result = self.service.alert_details(event_id="01JF")
+
+        # Then
+        self.assertEqual(result["event"]["origin_message"], {"_index": "graylog_1", "_id": "m1"})
+        self.assertEqual(result["originating_message"]["message"], "fired")
+        q = self.logs.last_query
+        self.assertEqual((q.text, q.window), ("*", Between("2026-10-07T11:59:00.000Z", "2026-10-07T12:00:00.001Z")))
+
+    def test_given_missing_definition_and_message_when_getting_details_then_reports_them_inline(self):
+        # Given
+        event = Event(
+            "01JG",
+            "gone",
+            None,
+            "t",
+            "m",
+            1,
+            True,
+            None,
+            None,
+            {},
+            origin_context="urn:graylog:message:es:i:x",
+            timerange_start="2026-10-07T11:55:00.000Z",
+            timerange_end="2026-10-07T12:00:00.000Z",
+            source_streams=("s1",),
+        )
+        self.store.page = EventPage(1, (event,), 1)
+
+        # When
+        result = self.service.alert_details(event_id="01JG")
+
+        # Then
+        self.assertEqual(result["definition"]["kind"], "NotFound")
+        self.assertEqual(result["originating_message"]["kind"], "NotFound")
+        self.assertEqual(result["matching_messages"], [])
+        self.assertIn("no messages were searched", result["note"])
+
+    def test_given_bad_event_id_or_no_timestamp_when_asked_then_rejects_it(self):
+        self.store.page = EventPage(1, (Event("01JH", None, None, None, "m", 1, True, None, None),), 1)
+        with self.assertRaises(InvalidRequestError):
+            self.service.alert_details(event_id='x" OR *')
+        with self.assertRaises(InvalidRequestError):
+            self.service.find_related_alerts(event_id="01JH")
+
+    def test_given_unreadable_stream_when_getting_details_then_reports_it_per_stream(self):
+        # Given
+        event = Event(
+            "01JI",
+            "d1",
+            None,
+            "t",
+            "m",
+            1,
+            True,
+            None,
+            None,
+            {},
+            timerange_start="2026-10-07T11:00:00Z",
+            timerange_end="2026-10-07T12:00:00Z",
+            source_streams=("s1",),
+        )
+        self.store.page = EventPage(1, (event,), 1)
+        self.store.definition_list = [
+            EventDefinition("d1", "Errors", None, 3, True, "aggregation-v1", "level:3", (), 300000, 60000)
+        ]
+
+        def refuse(_query):
+            raise AccessDeniedError("no")
+
+        self.logs.responder = refuse
+
+        # When
+        result = self.service.alert_details(event_id="01JI")
+
+        # Then
+        self.assertEqual(result["matching_messages"], [{"stream_id": "s1", "error": "no", "kind": "AccessDenied"}])
+
+    def test_given_nearby_events_when_finding_related_then_keeps_same_definition_or_group_by(self):
+        # Given
+        def ev(event_id, definition_id, group_by):
+            return Event(
+                event_id, definition_id, None, "2026-10-07T12:00:00.000Z", "m", 1, True, None, None, {}, group_by_fields=group_by
+            )
+
+        target = ev("01A", "d1", {"source": "web-1"})
+        self.store.page = EventPage(
+            9,
+            (target, ev("01B", "d1", {}), ev("01C", "d2", {"source": "web-1"}), ev("01D", "d3", {"source": "x"})),
+            4,
+        )
+
+        # When
+        result = self.service.find_related_alerts(event_id="01A", seconds=600)
+
+        # Then
+        q = self.store.queries[-1]
+        self.assertEqual(q.window, Between("2026-10-07T11:50:00.000Z", "2026-10-07T12:10:00.000Z"))
+        self.assertFalse(q.alerts_only)
+        self.assertEqual(
+            [(e["id"], e["related_by"]) for e in result["related"]],
+            [("01B", ["same definition"]), ("01C", ["same source"])],
+        )
+        self.assertIn("newest 4 of 9", result["note"])
 
 
 class SavedViewServiceTest(unittest.TestCase):

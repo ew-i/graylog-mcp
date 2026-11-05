@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Protocol
 
 from ..domain.aggregation import AggregationQuery, AggregationTable
-from ..domain.alerts import EventPage, EventQuery
+from ..domain.alerts import Event, EventDefinition, EventPage, EventQuery
 from ..domain.capabilities import Capability
 from ..domain.configuration import (
     IndexSet,
@@ -84,6 +84,10 @@ class AggregationStore(Protocol):
 
 class AlertStore(Protocol):
     def events(self, query: EventQuery) -> EventPage: ...
+
+    def event(self, event_id: str) -> Event: ...
+
+    def definition(self, definition_id: str) -> EventDefinition: ...
 
     def definitions(self, query: ListingQuery) -> ListingPage: ...
 

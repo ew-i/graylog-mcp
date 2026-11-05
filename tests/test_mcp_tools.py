@@ -48,6 +48,8 @@ EXPECTED_TOOLS = {
     # alerts
     "recent_alerts",
     "alert_definitions",
+    "alert_details",
+    "find_related_alerts",
     # saved views
     "saved_searches",
     "run_saved_search",
@@ -104,7 +106,7 @@ class McpToolsTest(unittest.TestCase):
             ServiceBundle(
                 search=search,
                 analytics=AnalyticsService(self.logs, self.agg),
-                alerts=AlertService(FakeAlertStore()),
+                alerts=AlertService(FakeAlertStore(), search),
                 views=SavedViewService(FakeViewStore(), search),
                 operations=OperationsService(self.system),
                 configuration=ConfigurationService(
@@ -383,6 +385,12 @@ class McpToolsTest(unittest.TestCase):
                 "alert_definitions",
                 {"text": "error", "limit": 3, "next_cursor": ""},
             ),
+            "alert_details": (alerts, "alert_details", {"event_id": "01JE", "limit": 3}),
+            "find_related_alerts": (
+                alerts,
+                "find_related_alerts",
+                {"event_id": "01JE", "seconds": 123, "limit": 3},
+            ),
             "saved_searches": (
                 views,
                 "saved_searches",
@@ -496,6 +504,7 @@ class McpToolsTest(unittest.TestCase):
                 "definition_id": "def-1",
             },
             "alert_definitions": {"query": "error", "limit": 3},
+            "find_related_alerts": {"event_id": "01JE", "range_seconds": 123, "limit": 3},
             "saved_searches": {"query": "error", "limit": 3},
             "dashboards": {"query": "ops", "limit": 3},
             "lookup_tables": {"query": "hosts", "limit": 3},

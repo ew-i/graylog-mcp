@@ -25,6 +25,8 @@ alerts, saved searches, cluster health and configuration.
 |               | `field_stats`                            | count/avg/min/max/sum/percentiles of a numeric field                    | 5.1+               |
 |               | `message_context`                        | Messages just before/after one message (same source/pod)                |                    |
 | Alerts        | `recent_alerts`                          | Alerts/events raised in a window                                        | events read        |
+|               | `alert_details`                          | One alert with its definition, originating and matching messages        | events, stream read|
+|               | `find_related_alerts`                    | Events nearby with the same definition or group-by values               | events read        |
 |               | `alert_definitions`                      | What each event definition checks and how often                         | events read        |
 | Saved views   | `saved_searches` / `dashboards`          | List them                                                               | view read          |
 |               | `run_saved_search`                       | Run a saved search's query, stream and range                            | view read          |
@@ -436,12 +438,13 @@ login admin / admin:
 |---------|--------------------------|-------------------------------|
 | `5.1`   | `http://localhost:29000` | `http://localhost:29001/gelf` |
 | `6.3`   | `http://localhost:39000` | `http://localhost:39001/gelf` |
-| `7.2`   | `http://localhost:49000` | `http://localhost:49001/gelf` |
+| `7.1`   | `http://localhost:49000` | `http://localhost:49001/gelf` |
+| `7.2`   | `http://localhost:59000` | `http://localhost:59001/gelf` |
 
 ```bash
 python scripts/live/stack.py up 7.2
-uv run python scripts/live_check.py --base-url http://localhost:49000 \
-    --user admin --password admin --gelf-url http://localhost:49001/gelf
+uv run python scripts/live_check.py --base-url http://localhost:59000 \
+    --user admin --password admin --gelf-url http://localhost:59001/gelf
 python scripts/live/stack.py down 7.2
 ```
 

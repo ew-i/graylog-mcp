@@ -46,13 +46,14 @@ def register(server: MCPServer) -> None:
 
 1. Call `recent_alerts` with range_seconds={range_seconds} and find {target}. If none
    matches, call it again with alerts_only=false, list the closest events and stop.
-2. Call `alert_definitions` for its definition: query, streams, search window and
-   priority. If the definition has no streams, call `browse_streams` and ask which to use.
+2. Call `alert_details` with its event ID: the definition (query, streams, window),
+   the message that fired it and the matching messages. If no streams are named,
+   call `browse_streams` and ask which to use.
 3. On each stream, call `count_over_time` with the definition query over a range that
    includes the alert, and `compare_windows` for the same query against yesterday.
    Is this a spike, a slow rise, or normal noise?
-4. Call `find_logs_between` with the definition query around the alert time, then
-   `message_context` on one representative message.
+4. Call `message_context` on the originating message or one representative
+   matching message, and `find_related_alerts` to see whether it fired alone.
 5. Call `exact_field_counts` on fields such as source or service (check names with
    `discover_fields`) to see whether one host or service dominates.
 

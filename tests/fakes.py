@@ -6,7 +6,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from graylog_mcp.domain.aggregation import AggregationQuery, AggregationTable
-from graylog_mcp.domain.alerts import EventDefinition, EventPage, EventQuery
+from graylog_mcp.domain.alerts import Event, EventDefinition, EventPage, EventQuery
 from graylog_mcp.domain.capabilities import Capability
 from graylog_mcp.domain.configuration import (
     IndexSet,
@@ -132,6 +132,18 @@ class FakeAlertStore:
     def events(self, query: EventQuery) -> EventPage:
         self.queries.append(query)
         return self.page
+
+    def event(self, event_id: str) -> Event:
+        for found in self.page.events:
+            if found.id == event_id:
+                return found
+        raise NotFoundError(event_id)
+
+    def definition(self, definition_id: str) -> EventDefinition:
+        for found in self.definition_list:
+            if found.id == definition_id:
+                return found
+        raise NotFoundError(definition_id)
 
     def definitions(self, query: ListingQuery) -> ListingPage:
         self.definition_requests.append((query.text, query.limit))

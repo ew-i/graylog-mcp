@@ -66,7 +66,7 @@ class ResourceCatalogueTest(unittest.TestCase):
             ServiceBundle(
                 search=search,
                 analytics=AnalyticsService(logs, FakeAggregationStore()),
-                alerts=AlertService(FakeAlertStore()),
+                alerts=AlertService(FakeAlertStore(), search),
                 views=SavedViewService(views, search),
                 operations=OperationsService(FakeSystemStore()),
                 configuration=ConfigurationService(FakeConfigStore()),

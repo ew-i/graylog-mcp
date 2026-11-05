@@ -503,6 +503,63 @@ class AlertAdapterTest(unittest.TestCase):
         # Then
         self.assertEqual(page.events[0].definition_title, None)
 
+    def test_given_event_by_id_when_fetching_then_parses_origin_and_aggregation_fields(self):
+        # Given
+        raw = {
+            "id": "01JE",
+            "event_definition_id": "d1",
+            "origin_context": "urn:graylog:message:es:graylog_1:abc-123",
+            "timerange_start": "2026-10-07T11:55:00.000Z",
+            "timerange_end": "2026-10-07T12:00:00.000Z",
+            "source_streams": ["s1"],
+            "group_by_fields": {"source": "web-1"},
+        }
+        store, router = make(GraylogAlertStore, {("GET", "/api/events/01JE"): {"event": raw, "index_name": "gl-events_0"}})
+
+        # When
+        event = store.event("01JE")
+
+        # Then
+        self.assertEqual(event.origin_message(), {"_index": "graylog_1", "_id": "abc-123"})
+        self.assertEqual(
+            (event.timerange_start, event.source_streams, dict(event.group_by_fields)),
+            ("2026-10-07T11:55:00.000Z", ("s1",), {"source": "web-1"}),
+        )
+        self.assertEqual(len(router.requests), 1)
+
+    def test_given_server_without_event_lookup_when_fetching_then_searches_all_time_by_id(self):
+        # Given: before 5.1 GET /api/events/{id} is a 404
+        store, router = make(GraylogAlertStore, {("POST", "/api/events/search"): {"events": [{"event": {"id": "01JE"}}]}})
+
+        # When
+        event = store.event("01JE")
+
+        # Then
+        self.assertEqual(event.id, "01JE")
+        body = router.body()
+        self.assertEqual((body["query"], body["timerange"]), ('id:"01JE"', {"type": "relative", "range": 0}))
+
+    def test_given_unknown_event_when_fetching_then_not_found(self):
+        # Given
+        store, _ = make(GraylogAlertStore, {("POST", "/api/events/search"): {"events": []}})
+
+        # When / Then
+        with self.assertRaises(NotFoundError):
+            store.event("01JE")
+
+    def test_given_definition_id_when_fetching_definition_then_parses_it(self):
+        # Given
+        store, _ = make(
+            GraylogAlertStore,
+            {("GET", "/api/events/definitions/d1"): {"id": "d1", "title": "Errors", "config": {"query": "level:3"}}},
+        )
+
+        # When
+        d = store.definition("d1")
+
+        # Then
+        self.assertEqual((d.title, d.query), ("Errors", "level:3"))
+
     def test_given_either_list_key_when_listing_definitions_then_parses_definition_and_pages_by_number(self):
         # Given
         definition = {

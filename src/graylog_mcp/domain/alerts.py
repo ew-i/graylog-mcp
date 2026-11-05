@@ -46,6 +46,19 @@ class Event:
     source: str | None
     key: str | None
     fields: Mapping[str, Any] = field(default_factory=dict)
+    origin_context: str | None = None
+    timerange_start: str | None = None
+    timerange_end: str | None = None
+    source_streams: tuple[str, ...] = ()
+    group_by_fields: Mapping[str, Any] = field(default_factory=dict)
+
+    def origin_message(self) -> dict[str, str] | None:
+        """The `_index` and `_id` of the message that fired the event, from an origin
+        context such as `urn:graylog:message:es:graylog_1:<id>`; None for other origins."""
+        parts = (self.origin_context or "").split(":")
+        if len(parts) != 6 or parts[:3] != ["urn", "graylog", "message"] or not all(parts[4:]):
+            return None
+        return {"_index": parts[4], "_id": parts[5]}
 
 
 @dataclass(frozen=True)
