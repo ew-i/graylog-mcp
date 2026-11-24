@@ -6,6 +6,7 @@ Each area registers its own tools; none of them raise. Failures become
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal
 
@@ -61,7 +62,10 @@ def build_server(
     log_level: LogLevel = "INFO",
     resource_cache_seconds: float = resources.CACHE_SECONDS,
     redactor: redaction.Redactor | None = None,
+    cache_scope: Callable[[], str] = lambda: "",
 ) -> MCPServer:
+    """`cache_scope` names the current caller when callers see different Graylog
+    data (each with their own token), so cached resources stay per caller."""
     server = MCPServer(name, instructions=INSTRUCTIONS, log_level=log_level)
     respond = Responder(redactor or redaction.Redactor())
     tools_search.register(server, services.search, respond)
@@ -71,7 +75,9 @@ def build_server(
     tools_operations.register(server, services.operations, respond)
     tools_configuration.register(server, services.configuration, respond)
     tools_capabilities.register(server, services.capabilities, respond)
-    resources.register(server, services, respond, resources.TtlCache(resource_cache_seconds))
+    resources.register(
+        server, services, respond, resources.TtlCache(resource_cache_seconds, scope=cache_scope)
+    )
     prompts.register(server)
     tools_incident.register(
         server,

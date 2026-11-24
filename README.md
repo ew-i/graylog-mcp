@@ -154,19 +154,23 @@ docker run --rm -p 127.0.0.1:8000:8000 \
   graylog-mcp
 ```
 
-Then configure the client with the URL:
+Then configure the client with the URL, plus the bearer token when
+[authentication](#http-exposure) is on:
 
 ```json
 {
   "mcpServers": {
-    "graylog": { "url": "http://127.0.0.1:8000/mcp" }
+    "graylog": {
+      "url": "http://127.0.0.1:8000/mcp",
+      "headers": { "Authorization": "Bearer your-token" }
+    }
   }
 }
 ```
 
-The HTTP endpoint has no authentication of its own: anyone who can reach it can
-read Graylog with the configured token. Before exposing it beyond localhost,
-read [HTTP exposure](#http-exposure).
+Without `MCP_AUTH_MODE`, anyone who can reach the endpoint can read Graylog with
+the configured token. Before exposing it beyond localhost, read
+[HTTP exposure](#http-exposure).
 
 ## Tools
 
@@ -299,7 +303,7 @@ matching flag is given. See [`.env.example`](.env.example) for a template.
 | Variable                      | CLI flag                                             | Default | Description                                           |
 |-------------------------------|------------------------------------------------------|---------|-------------------------------------------------------|
 | `GRAYLOG_BASE_URL`            | `--base-url`                                         | –       | **Required.** Graylog URL, `https://` unless allowed  |
-| `GRAYLOG_API_TOKEN`           | `--api-token`                                        | –       | **Required.** Graylog API token                       |
+| `GRAYLOG_API_TOKEN`           | `--api-token`                                        | –       | **Required**, except with `MCP_AUTH_MODE=graylog`     |
 | `GRAYLOG_VERIFY_TLS`          | `--verify-tls` / `--no-verify-tls`                   | `true`  | Verify the Graylog TLS certificate                    |
 | `GRAYLOG_ALLOW_INSECURE_HTTP` | `--allow-insecure-http` / `--no-allow-insecure-http` | `false` | Allow an `http://` Graylog URL, for local development |
 | `GRAYLOG_TIMEOUT_SECONDS`     | `--timeout-seconds`                                  | `30`    | HTTP request timeout                                  |
@@ -315,6 +319,8 @@ matching flag is given. See [`.env.example`](.env.example) for a template.
 | `MCP_ENABLE_DNS_REBINDING_PROTECTION` | `--enable-dns-rebinding-protection` / `--no-enable-dns-rebinding-protection` | `true`      | Validate HTTP `Host` and `Origin` headers                         |
 | `MCP_ALLOWED_HOSTS`                   | `--allowed-hosts`                                                            | loopback    | Comma-separated allowed `Host` values                             |
 | `MCP_ALLOWED_ORIGINS`                 | `--allowed-origins`                                                          | loopback    | Comma-separated allowed `Origin` values                           |
+| `MCP_AUTH_MODE`                       | `--auth-mode`                                                                | `none`      | HTTP client auth: `none`, `token` or `graylog`                    |
+| `MCP_AUTH_TOKEN`                      | `--auth-token`                                                               | –           | Shared bearer token for `token` mode, at least 32 characters      |
 | `MCP_REDACT_FIELDS`                   | `--redact-fields`                                                            | empty       | Comma-separated extra field names to redact                       |
 | `MCP_RESOURCE_CACHE_SECONDS`          | `--resource-cache-seconds`                                                   | `60`        | Resource cache lifetime; `0` disables                             |
 | `MCP_LOG_LEVEL`                       | `--log-level`                                                                | `INFO`      | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`                 |
@@ -354,9 +360,24 @@ disabled.
 
 ### HTTP exposure
 
-The Streamable HTTP endpoint does not authenticate clients. Keep it on
-`127.0.0.1` (the default), or put it behind a reverse proxy or network policy
-that does.
+By default the Streamable HTTP endpoint does not authenticate clients, so keep
+it on `127.0.0.1` (the default) or turn on authentication with
+`MCP_AUTH_MODE`. Clients then send `Authorization: Bearer <token>`:
+
+| Mode      | Clients send                  | Graylog is read with                   |
+|-----------|-------------------------------|----------------------------------------|
+| `none`    | nothing                       | `GRAYLOG_API_TOKEN`                    |
+| `token`   | `MCP_AUTH_TOKEN` (32+ chars)  | `GRAYLOG_API_TOKEN`                    |
+| `graylog` | their own Graylog API token   | the client's token (no server token)   |
+
+`graylog` mode gives each client its own Graylog permissions and audit trail.
+Serve it over HTTPS (for example behind a reverse proxy), since the token
+travels with every request.
+
+```bash
+MCP_AUTH_TOKEN=$(openssl rand -hex 32) \
+uv run graylog-mcp --transport streamable-http --auth-mode token
+```
 
 DNS-rebinding protection is on by default and accepts only loopback `Host` and
 `Origin` values, so a web page in your browser can't reach the server. When it
@@ -367,6 +388,7 @@ the loopback defaults, and `:*` matches any port:
 uv run graylog-mcp \
   --transport streamable-http \
   --host 0.0.0.0 \
+  --auth-mode graylog \
   --allowed-hosts mcp.example.com:8000,localhost:* \
   --allowed-origins https://app.example
 ```
@@ -448,6 +470,7 @@ src/graylog_mcp/
     graylog_http.py  graylog_analytics.py  graylog_alerts.py
     graylog_views.py  graylog_system.py  graylog_config.py
     config.py         Pydantic settings from CLI, environment and .env
+    http_auth.py      bearer authentication for the HTTP endpoint
   interface/        MCP surface
     mcp_tools.py      ServiceBundle and build_server
     tools_*.py        tools, one module per area

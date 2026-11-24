@@ -16,13 +16,23 @@ import httpx
 from ..domain.errors import AccessDeniedError, BackendError, BackendUnavailableError, NotFoundError
 from ..domain.models import Between, LastSeconds, TimeWindow
 from .config import Settings
+from .http_auth import CallerTokenAuth
 
 
 def build_http_client(settings: Settings) -> httpx.Client:
-    """Graylog tokens are sent as basic-auth username with password 'token'."""
+    """Graylog tokens are sent as basic-auth username with password 'token'.
+
+    In graylog auth mode there is no server token: each request carries the
+    token of the client being served.
+    """
+    auth: httpx.Auth | tuple[str, str] = (
+        CallerTokenAuth()
+        if settings.auth_mode == "graylog"
+        else (settings.api_token.get_secret_value(), "token")
+    )
     return httpx.Client(
         base_url=settings.base_url,
-        auth=(settings.api_token.get_secret_value(), "token"),
+        auth=auth,
         headers={"Accept": "application/json", "X-Requested-By": "graylog-mcp"},
         timeout=settings.timeout_seconds,
         verify=settings.verify_tls,

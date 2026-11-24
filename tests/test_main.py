@@ -1,13 +1,16 @@
+import io
 import os
 import runpy
 import sys
 import unittest
 import warnings
-from unittest.mock import patch
+from contextlib import redirect_stderr
+from unittest.mock import Mock, patch
 
 import httpx
 
 from graylog_mcp import cli as entry
+from graylog_mcp.infrastructure.http_auth import BearerAuthMiddleware
 
 
 class FakeServer:
@@ -18,6 +21,11 @@ class FakeServer:
     def run(self, *, transport, **options):
         self.transport = transport
         self.options = options
+
+    def streamable_http_app(self, **options):
+        self.transport = "streamable-http"
+        self.options = options
+        return "mcp-app"
 
 
 class ClientContext:
@@ -299,35 +307,39 @@ class CompositionRootTest(unittest.TestCase):
             {"employee_id": "[REDACTED]", "message": "sent [REDACTED]"},
         )
 
-    def test_given_http_settings_when_running_main_then_streamable_http_server_starts(self):
-        # Given
+    def run_http_main(self, environment: dict[str, str]) -> tuple[FakeServer, Mock, str]:
         server = FakeServer()
+        stderr = io.StringIO()
         with (
-            patch.dict(
-                os.environ,
-                {
-                    "GRAYLOG_BASE_URL": "https://gl.example",
-                    "GRAYLOG_API_TOKEN": "token",
-                    "MCP_TRANSPORT": "streamable-http",
-                    "MCP_HOST": "0.0.0.0",
-                    "MCP_PORT": "9000",
-                    "MCP_STREAMABLE_HTTP_PATH": "/api/mcp",
-                    "MCP_ENABLE_DNS_REBINDING_PROTECTION": "true",
-                    "MCP_ALLOWED_HOSTS": "mcp.example:9000",
-                    "MCP_ALLOWED_ORIGINS": "https://app.example",
-                },
-                clear=True,
-            ),
+            patch.dict(os.environ, environment, clear=True),
             patch.object(entry, "build_http_client", return_value=ClientContext()),
             patch.object(entry, "build_server", return_value=server),
+            patch.object(entry.uvicorn, "run") as run,
+            redirect_stderr(stderr),
         ):
             # When / Then
             self.assertEqual(entry.main([]), 0)
+        return server, run, stderr.getvalue()
+
+    def test_given_http_settings_when_running_main_then_streamable_http_server_starts(self):
+        # Given / When
+        server, run, stderr = self.run_http_main(
+            {
+                "GRAYLOG_BASE_URL": "https://gl.example",
+                "GRAYLOG_API_TOKEN": "token",
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_HOST": "0.0.0.0",
+                "MCP_PORT": "9000",
+                "MCP_STREAMABLE_HTTP_PATH": "/api/mcp",
+                "MCP_ENABLE_DNS_REBINDING_PROTECTION": "true",
+                "MCP_ALLOWED_HOSTS": "mcp.example:9000",
+                "MCP_ALLOWED_ORIGINS": "https://app.example",
+            }
+        )
 
         # Then
         self.assertEqual(server.transport, "streamable-http")
         self.assertEqual(server.options["host"], "0.0.0.0")
-        self.assertEqual(server.options["port"], 9000)
         self.assertEqual(server.options["streamable_http_path"], "/api/mcp")
         self.assertEqual(
             server.options["transport_security"].model_dump(),
@@ -337,6 +349,56 @@ class CompositionRootTest(unittest.TestCase):
                 "allowed_origins": ["https://app.example"],
             },
         )
+        run.assert_called_once_with("mcp-app", host="0.0.0.0", port=9000, log_level="info")
+        self.assertIn("without authentication", stderr)
+
+    def test_given_an_auth_mode_when_running_main_then_the_app_is_protected(self):
+        for mode, extra in (
+            ("token", {"MCP_AUTH_TOKEN": "s" * 32, "GRAYLOG_API_TOKEN": "token"}),
+            ("graylog", {}),
+        ):
+            with self.subTest(mode=mode):
+                # Given / When
+                _, run, stderr = self.run_http_main(
+                    {
+                        "GRAYLOG_BASE_URL": "https://gl.example",
+                        "MCP_TRANSPORT": "streamable-http",
+                        "MCP_HOST": "0.0.0.0",
+                        "MCP_AUTH_MODE": mode,
+                        **extra,
+                    }
+                )
+
+                # Then
+                self.assertIsInstance(run.call_args.args[0], BearerAuthMiddleware)
+                self.assertEqual(stderr, "")
+
+    def test_given_graylog_mode_when_running_main_then_caches_and_redaction_follow_the_caller(
+        self,
+    ):
+        # Given
+        server = FakeServer()
+        with (
+            patch.dict(
+                os.environ,
+                {
+                    "GRAYLOG_BASE_URL": "https://gl.example",
+                    "MCP_TRANSPORT": "streamable-http",
+                    "MCP_AUTH_MODE": "graylog",
+                },
+                clear=True,
+            ),
+            patch.object(entry, "build_http_client", return_value=ClientContext()),
+            patch.object(entry, "build_server", return_value=server) as build_server,
+            patch.object(entry.uvicorn, "run"),
+        ):
+            # When
+            entry.main([])
+
+        # Then
+        options = build_server.call_args.kwargs
+        self.assertIs(options["cache_scope"], entry.caller_scope)
+        self.assertIs(options["redactor"]._current_secret, entry.caller_token)
 
 
 if __name__ == "__main__":

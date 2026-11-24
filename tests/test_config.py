@@ -237,6 +237,71 @@ class SettingsTest(unittest.TestCase):
         self.assertFalse(security.enable_dns_rebinding_protection)
 
 
+class AuthSettingsTest(unittest.TestCase):
+    HTTP = {**BASE, "MCP_TRANSPORT": "streamable-http"}
+
+    def test_given_no_auth_settings_when_loading_then_auth_is_off(self):
+        with patch.dict(os.environ, BASE, clear=True):
+            self.assertEqual(Settings().validated().auth_mode, "none")
+
+    def test_given_auth_mode_in_any_case_or_blank_when_loading_then_it_is_normalised(self):
+        for raw, mode in ((" Graylog ", "graylog"), ("NONE", "none"), (" ", "none")):
+            with self.subTest(raw=raw), patch.dict(os.environ, self.HTTP, clear=True):
+                self.assertEqual(Settings(auth_mode=raw).validated().auth_mode, mode)
+
+    def test_given_token_mode_when_the_secret_is_long_enough_then_it_is_accepted(self):
+        environment = {**self.HTTP, "MCP_AUTH_MODE": "token", "MCP_AUTH_TOKEN": "s" * 32}
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings().validated()
+        self.assertEqual(settings.auth_token.get_secret_value(), "s" * 32)
+
+    def test_given_graylog_mode_when_no_server_token_is_set_then_it_is_not_required(self):
+        environment = {
+            "GRAYLOG_BASE_URL": "https://gl.example",
+            "MCP_TRANSPORT": "streamable-http",
+            "MCP_AUTH_MODE": "graylog",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings().validated()
+        self.assertEqual(settings.warnings(), [])
+
+    def test_given_invalid_auth_settings_when_loading_then_explains_each_problem(self):
+        for environment, message in (
+            ({**BASE, "MCP_AUTH_MODE": "token"}, "applies only to"),
+            ({**BASE, "MCP_AUTH_MODE": "graylog"}, "applies only to"),
+            ({**self.HTTP, "MCP_AUTH_MODE": "token"}, "at least 32 characters"),
+            ({**self.HTTP, "MCP_AUTH_MODE": "token", "MCP_AUTH_TOKEN": "s" * 31}, "at least 32"),
+            ({**self.HTTP, "MCP_AUTH_MODE": "basic"}, "MCP_AUTH_MODE"),
+        ):
+            with (
+                self.subTest(**environment),
+                patch.dict(os.environ, environment, clear=True),
+                self.assertRaises((ConfigError, ValidationError)) as raised,
+            ):
+                Settings().validated()
+            self.assertIn(message, str(raised.exception))
+
+    def test_given_risky_combinations_when_loading_then_warns_about_each(self):
+        for environment, warning in (
+            ({**self.HTTP, "MCP_HOST": "0.0.0.0"}, "without authentication"),
+            ({**self.HTTP, "MCP_AUTH_MODE": "graylog"}, "GRAYLOG_API_TOKEN is not used"),
+        ):
+            with self.subTest(**environment), patch.dict(os.environ, environment, clear=True):
+                warnings = Settings().validated().warnings()
+            self.assertEqual(len(warnings), 1)
+            self.assertIn(warning, warnings[0])
+
+    def test_given_safe_combinations_when_loading_then_nothing_is_warned(self):
+        for environment in (
+            BASE,
+            {**BASE, "MCP_HOST": "0.0.0.0"},  # stdio ignores the host
+            self.HTTP,  # loopback
+            {**self.HTTP, "MCP_HOST": "0.0.0.0", "MCP_AUTH_MODE": "token", "MCP_AUTH_TOKEN": "s" * 32},
+        ):
+            with self.subTest(**environment), patch.dict(os.environ, environment, clear=True):
+                self.assertEqual(Settings().validated().warnings(), [])
+
+
 class HttpTransportSecurityTest(unittest.TestCase):
     """The default settings, applied by the MCP SDK to real HTTP requests."""
 

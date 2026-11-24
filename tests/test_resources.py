@@ -168,7 +168,27 @@ class ResourceCacheTest(unittest.TestCase):
         cache.get("b", lambda: 2)
 
         # Then
-        self.assertEqual(set(cache._entries), {"b"})
+        self.assertEqual({key for _, key in cache._entries}, {"b"})
+
+    def test_given_scoped_cache_when_two_callers_read_then_each_gets_its_own_entry(self):
+        # Given
+        caller = "alice"
+        cache = resources.TtlCache(10, clock=lambda: self.now, scope=lambda: caller)
+        loads = []
+
+        def load():
+            loads.append(caller)
+            return f"data for {caller}"
+
+        # When
+        first = cache.get("graylog://streams", load)
+        again = cache.get("graylog://streams", load)
+        caller = "bob"
+        other = cache.get("graylog://streams", load)
+
+        # Then
+        self.assertEqual((first, again, other), ("data for alice",) * 2 + ("data for bob",))
+        self.assertEqual(loads, ["alice", "bob"])
 
     def test_given_two_resources_when_reading_both_then_each_has_its_own_entry(self):
         # Given

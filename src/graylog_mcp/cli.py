@@ -7,6 +7,7 @@ import sys
 from collections.abc import Sequence
 
 import httpx
+import uvicorn
 from pydantic import ValidationError
 
 from .application.alerts import AlertService
@@ -25,6 +26,7 @@ from .infrastructure.graylog_config import GraylogConfigStore
 from .infrastructure.graylog_http import GraylogStore
 from .infrastructure.graylog_system import GraylogSystemStore
 from .infrastructure.graylog_views import GraylogViewStore
+from .infrastructure.http_auth import caller_scope, caller_token, protect
 from .interface.mcp_tools import ServiceBundle, build_server
 from .interface.redaction import Redactor
 from .interface.resources import CACHE_SECONDS
@@ -116,6 +118,18 @@ def parse_args(argv: Sequence[str] | None = None) -> Settings:
         type=float,
         help="How long MCP resource reads are cached; 0 disables caching",
     )
+    parser.add_argument(
+        "--auth-mode",
+        type=str.lower,
+        choices=("none", "token", "graylog"),
+        help="HTTP client authentication: none, token (MCP_AUTH_TOKEN) or graylog "
+        "(each client's own Graylog API token)",
+    )
+    parser.add_argument(
+        "--auth-token",
+        help="Shared bearer token for --auth-mode token; prefer MCP_AUTH_TOKEN, "
+        "since arguments show up in the process list",
+    )
     try:
         return Settings(**vars(parser.parse_args(argv))).validated()
     except ValidationError as exc:
@@ -128,23 +142,36 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ConfigError as exc:
         print(f"graylog-mcp: {exc}", file=sys.stderr)
         return 1
+    for warning in settings.warnings():
+        print(f"graylog-mcp: warning: {warning}", file=sys.stderr)
 
+    per_caller = settings.auth_mode == "graylog"
     with build_http_client(settings) as http:
         server = build_server(
             wire(http, settings.resource_cache_seconds),
             log_level=settings.log_level,
             resource_cache_seconds=settings.resource_cache_seconds,
             redactor=Redactor(
-                settings.redact_field_names(), secrets=(settings.api_token.get_secret_value(),)
+                settings.redact_field_names(),
+                secrets=(
+                    settings.api_token.get_secret_value(),
+                    settings.auth_token.get_secret_value(),
+                ),
+                current_secret=caller_token if per_caller else lambda: None,
             ),
+            cache_scope=caller_scope if per_caller else lambda: "",
         )
         if settings.transport == "streamable-http":
-            server.run(
-                transport=settings.transport,
-                host=settings.host,
-                port=settings.port,
+            app = server.streamable_http_app(
                 streamable_http_path=settings.streamable_http_path,
                 transport_security=settings.transport_security_settings(),
+                host=settings.host,
+            )
+            uvicorn.run(
+                protect(app, settings, http),
+                host=settings.host,
+                port=settings.port,
+                log_level=settings.log_level.lower(),
             )
         else:
             server.run(transport=settings.transport)

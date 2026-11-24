@@ -37,25 +37,34 @@ class TtlCache:
 
     MCP runs resource reads in worker threads, so the entries are guarded by a
     lock; `load` runs outside it, so one slow Graylog call blocks no other read.
+    `scope` names the current caller when callers may see different data, so
+    no caller is served another's cached result.
     """
 
-    def __init__(self, ttl: float, clock: Callable[[], float] = time.monotonic) -> None:
+    def __init__(
+        self,
+        ttl: float,
+        clock: Callable[[], float] = time.monotonic,
+        scope: Callable[[], str] = lambda: "",
+    ) -> None:
         self.ttl = ttl
         self._clock = clock
+        self._scope = scope
         self._lock = threading.Lock()
-        self._entries: dict[str, tuple[float, Any]] = {}
+        self._entries: dict[tuple[str, str], tuple[float, Any]] = {}
 
     def get(self, key: str, load: Callable[[], Any]) -> Any:
         now = self._clock()
+        scoped = (self._scope(), key)
         with self._lock:
-            cached = self._entries.get(key)
+            cached = self._entries.get(scoped)
         if cached is not None and now - cached[0] < self.ttl:
             return cached[1]
         value = load()  # an exception propagates and leaves the cache unchanged
         with self._lock:
             # Drop expired entries so per-stream keys cannot accumulate forever.
             self._entries = {k: v for k, v in self._entries.items() if now - v[0] < self.ttl}
-            self._entries[key] = (now, value)
+            self._entries[scoped] = (now, value)
         return value
 
 

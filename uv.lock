@@ -536,12 +536,13 @@ coverage = [
 
 [[package]]
 name = "graylog-mcp"
-version = "1.9.2"
+version = "1.10.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
     { name = "mcp" },
     { name = "pydantic-settings" },
+    { name = "uvicorn" },
 ]
 
 [package.dev-dependencies]
@@ -557,6 +558,7 @@ requires-dist = [
     { name = "httpx", specifier = "==0.28.1" },
     { name = "mcp", specifier = "==2.3.0" },
     { name = "pydantic-settings", specifier = "==2.16.1" },
+    { name = "uvicorn", specifier = "==0.54.0" },
 ]
 
 [package.metadata.requires-dev]

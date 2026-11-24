@@ -4,13 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name = "graylog-mcp"
-version = "1.9.2"
+version = "1.10.0"
 description = "Read-only Graylog search, analysis and health tools exposed over MCP"
 requires-python = ">=3.11"
 dependencies = [
     "mcp==2.3.0",
     "httpx==0.28.1",
     "pydantic-settings==2.16.1",
+    "uvicorn==0.54.0",
 ]
 
 [dependency-groups]

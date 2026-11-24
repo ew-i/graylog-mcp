@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any
 
 REDACTED = "[REDACTED]"
@@ -113,7 +113,14 @@ class Redactor:
     token, replaced wherever they appear.
     """
 
-    def __init__(self, fields: Iterable[str] = (), secrets: Iterable[str] = ()) -> None:
+    def __init__(
+        self,
+        fields: Iterable[str] = (),
+        secrets: Iterable[str] = (),
+        current_secret: Callable[[], str | None] = lambda: None,
+    ) -> None:
+        """`current_secret` returns a secret that changes per request, such as the
+        Graylog token of the client being served; it is redacted like `secrets`."""
         self._fields = frozenset(_normalized(name) for name in fields if name.strip())
         literals = sorted(
             {value for value in secrets if len(value) >= _MIN_LITERAL_SECRET_LENGTH},
@@ -121,6 +128,7 @@ class Redactor:
             reverse=True,
         )
         self._literals = re.compile("|".join(map(re.escape, literals))) if literals else None
+        self._current_secret = current_secret
 
     def is_sensitive_field(self, name: str) -> bool:
         key = _normalized(name)
@@ -174,6 +182,9 @@ class Redactor:
     def _redact_string(self, value: str) -> str:
         if self._literals:
             value = self._literals.sub(REDACTED, value)
+        current = self._current_secret()
+        if current and len(current) >= _MIN_LITERAL_SECRET_LENGTH:
+            value = value.replace(current, REDACTED)
         value = _PRIVATE_KEY.sub(REDACTED, value)
         value = _CREDENTIAL_URL.sub(rf"\1{REDACTED}\2", value)
         value = _WEBHOOK_URL.sub(rf"\1{REDACTED}", value)
