@@ -143,6 +143,19 @@ class McpToolsTest(unittest.TestCase):
                 self.assertIs(tool.annotations.destructive_hint, False)
                 self.assertIs(tool.annotations.idempotent_hint, True)
                 self.assertIs(tool.annotations.open_world_hint, True)
+                # No output schema: the JSON goes out once, as text, not again as a string.
+                self.assertIsNone(tool.output_schema)
+
+    def test_given_a_failing_tool_when_calling_then_the_result_is_flagged_as_an_error(self):
+        # When
+        failed = asyncio.run(self.server.call_tool("stream_rules", {"stream_id": "nope"}))
+        succeeded = asyncio.run(self.server.call_tool("browse_streams", {}))
+
+        # Then
+        self.assertTrue(failed.is_error)
+        self.assertEqual(json.loads(_text_of(failed))["kind"], "NotFound")
+        self.assertFalse(succeeded.is_error)
+        self.assertIsNone(succeeded.structured_content)
 
     def test_given_server_when_listing_tools_then_every_tool_is_documented(self):
         # When

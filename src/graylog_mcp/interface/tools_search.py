@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 
 from ..application.service import LogService
 from .responses import Responder
@@ -11,13 +12,13 @@ from .tool_annotations import READ_ONLY
 
 def register(server: MCPServer, service: LogService, respond: Responder) -> None:
     @server.tool(title="Cluster status", annotations=READ_ONLY)
-    def cluster_status() -> str:
+    def cluster_status() -> CallToolResult:
         """Report Graylog version, node/cluster identity, hostname, timezone and
         whether message processing is running."""
         return respond(service.cluster_info)
 
     @server.tool(title="Browse streams", annotations=READ_ONLY)
-    def browse_streams(limit: int = 50, next_cursor: str = "") -> str:
+    def browse_streams(limit: int = 50, next_cursor: str = "") -> CallToolResult:
         """List the log streams you may query, with their IDs.
 
         Call this before any search: every search, aggregation and field
@@ -39,7 +40,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         sort: str = "timestamp",
         sort_order: str = "desc",
         next_cursor: str = "",
-    ) -> str:
+    ) -> CallToolResult:
         """Search messages from the last N seconds.
 
         The window is fixed when the first page is fetched, so later pages
@@ -81,7 +82,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         sort: str = "timestamp",
         sort_order: str = "desc",
         next_cursor: str = "",
-    ) -> str:
+    ) -> CallToolResult:
         """Search messages between two ISO-8601 timestamps
         (e.g. '2026-03-15T00:00:00.000Z').
 
@@ -114,7 +115,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         )
 
     @server.tool(title="Validate query", annotations=READ_ONLY)
-    def validate_query(query: str, stream_id: str, range_seconds: int = 86400) -> str:
+    def validate_query(query: str, stream_id: str, range_seconds: int = 86400) -> CallToolResult:
         """Check a query's syntax and field names without running a search.
 
         status is OK, WARNING (e.g. UNKNOWN_FIELD: no message in the window has
@@ -132,7 +133,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         )
 
     @server.tool(title="Read log message", annotations=READ_ONLY)
-    def read_log_message(index: str, message_id: str, fields: str = "") -> str:
+    def read_log_message(index: str, message_id: str, fields: str = "") -> CallToolResult:
         """Fetch one message in full, using the _index and _id seen in search results.
 
         Args:
@@ -149,7 +150,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         stream_id: str,
         range_seconds: int = 86400,
         top_n: int = 20,
-    ) -> str:
+    ) -> CallToolResult:
         """Rank the most frequent values of a field among matching messages,
         e.g. which pods or error texts appear most in the last day.
 
@@ -172,7 +173,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         )
 
     @server.tool(title="Discover fields", annotations=READ_ONLY)
-    def discover_fields(stream_id: str, range_seconds: int = 3600) -> str:
+    def discover_fields(stream_id: str, range_seconds: int = 3600) -> CallToolResult:
         """List a stream's fields with their type and whether each is groupable
         (usable by exact_field_counts, compare_windows, group_by) or numeric
         (usable by field_stats). Full-text fields such as message are neither.

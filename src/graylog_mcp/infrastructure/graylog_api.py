@@ -7,6 +7,8 @@ endpoint-specific request and response shapes.
 
 from __future__ import annotations
 
+import random
+import time
 from collections.abc import Iterable, Mapping
 from typing import Any
 from urllib.parse import quote
@@ -73,13 +75,7 @@ class GraylogApi:
         return result
 
     def _send(self, method: str, path: str, **kwargs: Any) -> Any:
-        try:
-            response = self._http.request(method, path, **kwargs)
-        except httpx.TimeoutException as exc:
-            raise BackendUnavailableError(f"Graylog did not answer in time ({path})") from exc
-        except httpx.RequestError as exc:
-            raise BackendUnavailableError(f"could not reach Graylog: {exc}") from exc
-
+        response = self._request(method, path, **kwargs)
         status = response.status_code
         if status in (401, 403):
             raise AccessDeniedError(
@@ -96,6 +92,52 @@ class GraylogApi:
             return response.json()
         except ValueError as exc:
             raise BackendError(f"Graylog sent a non-JSON response for {path}") from exc
+
+    def _request(self, method: str, path: str, **kwargs: Any) -> httpx.Response:
+        """Send, retrying failures a restarting or overloaded Graylog causes.
+
+        Every call only reads, so a retry cannot change anything. Timeouts are
+        not retried: each already took the full timeout.
+        """
+        for attempt in range(RETRIES + 1):
+            last = attempt == RETRIES
+            try:
+                response = self._http.request(method, path, **kwargs)
+            except httpx.TimeoutException as exc:
+                raise BackendUnavailableError(f"Graylog did not answer in time ({path})") from exc
+            except _RETRYABLE_ERRORS as exc:
+                if last:
+                    raise BackendUnavailableError(f"could not reach Graylog: {exc}") from exc
+                time.sleep(_backoff(attempt))
+                continue
+            except httpx.RequestError as exc:
+                raise BackendUnavailableError(f"could not reach Graylog: {exc}") from exc
+            if response.status_code not in _RETRYABLE_STATUS or last:
+                return response
+            time.sleep(_retry_after(response) or _backoff(attempt))
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
+# Answers a restarting Graylog or a proxy in front of it gives; worth asking again.
+_RETRYABLE_STATUS = frozenset({429, 502, 503, 504})
+# Failures before Graylog got the request, or a connection it dropped while restarting.
+_RETRYABLE_ERRORS = (httpx.ConnectError, httpx.RemoteProtocolError)
+RETRIES = 2
+MAX_RETRY_WAIT_SECONDS = 5.0
+
+
+def _backoff(attempt: int) -> float:
+    """0.5 s, then 1 s, each with up to 50% jitter so clients don't retry in step."""
+    return 0.5 * 2**attempt * (1 + random.random() / 2)
+
+
+def _retry_after(response: httpx.Response) -> float | None:
+    """Graylog's or a proxy's Retry-After in seconds, capped so a tool call can't hang."""
+    try:
+        seconds = float(response.headers.get("retry-after", ""))
+    except ValueError:  # absent, or an HTTP date: fall back to the backoff
+        return None
+    return min(max(seconds, 0.0), MAX_RETRY_WAIT_SECONDS)
 
 
 def _expect_object(path: str, body: Any) -> dict[str, Any]:

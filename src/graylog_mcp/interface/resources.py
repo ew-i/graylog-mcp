@@ -128,7 +128,7 @@ def register(
         mime_type=_JSON,
     )
     def stream_fields(stream_id: str) -> str:
-        return respond(
+        return respond.text(
             lambda: cache.get(
                 f"graylog://streams/{stream_id}/fields",
                 lambda: services.search.discover_fields(
@@ -158,4 +158,4 @@ def _add(
 ) -> None:
     @server.resource(uri, name=name, description=description, mime_type=_JSON)
     def read() -> str:
-        return respond(lambda: cache.get(uri, load))
+        return respond.text(lambda: cache.get(uri, load))

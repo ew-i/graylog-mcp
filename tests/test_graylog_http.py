@@ -1,5 +1,6 @@
 import json
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -12,6 +13,7 @@ from graylog_mcp.domain.errors import (
     UnsupportedError,
 )
 from graylog_mcp.domain.models import Between, LastSeconds, LogQuery, Sort, SortDirection
+from graylog_mcp.infrastructure import graylog_api
 from graylog_mcp.infrastructure.config import Settings
 from graylog_mcp.infrastructure.graylog_api import (
     GraylogApi,
@@ -449,7 +451,10 @@ class SearchTest(unittest.TestCase):
 class ErrorMappingTest(unittest.TestCase):
     def assert_maps(self, reply, error_type):
         store, _ = store_with(reply)
-        with self.assertRaises(error_type):
+        with (
+            patch("graylog_mcp.infrastructure.graylog_api.time.sleep"),
+            self.assertRaises(error_type),
+        ):
             store.cluster_info()
 
     def test_given_http_error_statuses_when_calling_then_maps_statuses_to_domain_errors(self):
@@ -488,6 +493,121 @@ class ErrorMappingTest(unittest.TestCase):
 
         # When / Then
         self.assert_maps(slow, BackendUnavailableError)
+
+
+class RetryTest(unittest.TestCase):
+    """Temporary failures are asked again, up to RETRIES times, with a pause in between."""
+
+    def setUp(self):
+        sleeping = patch("graylog_mcp.infrastructure.graylog_api.time.sleep")
+        self.sleep = sleeping.start()
+        self.addCleanup(sleeping.stop)
+
+    def api(self, *replies):
+        """Graylog answering each request with the next reply (a response or an exception)."""
+        self.requests = 0
+        queue = list(replies)
+
+        def handler(request):
+            self.requests += 1
+            reply = queue.pop(0)
+            if isinstance(reply, Exception):
+                raise reply
+            return reply
+
+        return GraylogApi(httpx.Client(base_url="https://gl", transport=httpx.MockTransport(handler)))
+
+    def test_given_a_temporary_failure_then_success_when_calling_then_returns_the_answer(self):
+        for failure in (
+            httpx.Response(429),
+            httpx.Response(502),
+            httpx.Response(503),
+            httpx.Response(504),
+            httpx.ConnectError("refused"),
+            httpx.RemoteProtocolError("connection dropped"),
+        ):
+            with self.subTest(failure=failure):
+                # Given
+                api = self.api(failure, httpx.Response(200, json={"ok": True}))
+
+                # When / Then
+                self.assertEqual(api.get("/api/system"), {"ok": True})
+                self.assertEqual(self.requests, 2)
+
+    def test_given_failures_that_persist_when_calling_then_gives_up_after_the_retries(self):
+        for failure, error in (
+            (httpx.Response(503), BackendError),
+            (httpx.ConnectError("refused"), BackendUnavailableError),
+        ):
+            with self.subTest(failure=failure):
+                # Given
+                api = self.api(*[failure] * (graylog_api.RETRIES + 1))
+
+                # When / Then
+                with self.assertRaises(error):
+                    api.get("/api/system")
+                self.assertEqual(self.requests, graylog_api.RETRIES + 1)
+
+    def test_given_lasting_failures_when_not_temporary_then_asks_once(self):
+        for failure in (
+            httpx.Response(500),
+            httpx.Response(401),
+            httpx.Response(404),
+            httpx.ReadTimeout("slow"),
+            httpx.ReadError("reset while reading"),  # like a timeout: Graylog may be mid-search
+        ):
+            with self.subTest(failure=failure), self.assertRaises(BackendError):
+                # Given / When
+                self.api(failure).get("/api/system")
+
+            # Then
+            self.assertEqual(self.requests, 1)
+        self.sleep.assert_not_called()
+
+    def test_given_retries_when_waiting_then_backs_off_with_jitter(self):
+        # Given
+        api = self.api(httpx.Response(503), httpx.Response(503), httpx.Response(200, json={}))
+
+        # When
+        api.get("/api/system")
+
+        # Then 0.5 s, then 1 s, each plus up to 50%
+        first, second = (call.args[0] for call in self.sleep.call_args_list)
+        self.assertTrue(0.5 <= first <= 0.75)
+        self.assertTrue(1.0 <= second <= 1.5)
+
+    def test_given_retry_after_when_retrying_then_honours_it_up_to_the_cap(self):
+        for header, wait in (("2", 2.0), ("3600", graylog_api.MAX_RETRY_WAIT_SECONDS), ("-1", None)):
+            with self.subTest(header=header):
+                # Given
+                self.sleep.reset_mock()
+                api = self.api(
+                    httpx.Response(429, headers={"Retry-After": header}),
+                    httpx.Response(200, json={}),
+                )
+
+                # When
+                api.get("/api/system")
+
+                # Then a negative or zero wait falls back to the backoff
+                waited = self.sleep.call_args.args[0]
+                if wait is None:
+                    self.assertTrue(0.5 <= waited <= 0.75)
+                else:
+                    self.assertEqual(waited, wait)
+
+    def test_given_an_http_date_retry_after_when_retrying_then_uses_the_backoff(self):
+        # Given
+        api = self.api(
+            httpx.Response(503, headers={"Retry-After": "Wed, 21 Oct 2026 07:28:00 GMT"}),
+            httpx.Response(200, json={}),
+        )
+
+        # When
+        api.get("/api/system")
+
+        # Then
+        self.assertTrue(0.5 <= self.sleep.call_args.args[0] <= 0.75)
 
 
 class ClientFactoryTest(unittest.TestCase):

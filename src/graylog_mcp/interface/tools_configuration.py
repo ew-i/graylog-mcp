@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 
 from ..application.configuration import ConfigurationService
 from .responses import Responder
@@ -11,7 +12,7 @@ from .tool_annotations import READ_ONLY
 
 def register(server: MCPServer, service: ConfigurationService, respond: Responder) -> None:
     @server.tool(title="Stream rules", annotations=READ_ONLY)
-    def stream_rules(stream_id: str) -> str:
+    def stream_rules(stream_id: str) -> CallToolResult:
         """Which messages a stream receives: its routing rules, in plain words.
 
         Args:
@@ -20,7 +21,7 @@ def register(server: MCPServer, service: ConfigurationService, respond: Responde
         return respond(lambda: service.stream_rules(stream_id=stream_id))
 
     @server.tool(title="Pipeline rules", annotations=READ_ONLY)
-    def pipeline_rules(stream_id: str = "", include_source: bool = True) -> str:
+    def pipeline_rules(stream_id: str = "", include_source: bool = True) -> CallToolResult:
         """Processing pipelines (all, or those connected to one stream) with their
         stages and rules. These can rename, drop or add fields.
 
@@ -33,7 +34,7 @@ def register(server: MCPServer, service: ConfigurationService, respond: Responde
         )
 
     @server.tool(title="Index sets", annotations=READ_ONLY)
-    def index_sets(stream_id: str = "") -> str:
+    def index_sets(stream_id: str = "") -> CallToolResult:
         """Index sets with rotation and retention settings, which tell you how far
         back logs can be searched.
 
@@ -43,7 +44,7 @@ def register(server: MCPServer, service: ConfigurationService, respond: Responde
         return respond(lambda: service.index_sets(stream_id=stream_id))
 
     @server.tool(title="Lookup tables", annotations=READ_ONLY)
-    def lookup_tables(query: str = "", limit: int = 50, next_cursor: str = "") -> str:
+    def lookup_tables(query: str = "", limit: int = 50, next_cursor: str = "") -> CallToolResult:
         """List lookup tables (e.g. IP to hostname, user ID to name) that lookup_value can use.
 
         Args:
@@ -57,7 +58,7 @@ def register(server: MCPServer, service: ConfigurationService, respond: Responde
         )
 
     @server.tool(title="Look up value", annotations=READ_ONLY)
-    def lookup_value(table: str, key: str) -> str:
+    def lookup_value(table: str, key: str) -> CallToolResult:
         """Look up a key in a lookup table.
 
         Args:

@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from unittest.mock import patch
 
 import httpx
 
@@ -141,7 +142,8 @@ class CapabilityProbeTest(unittest.TestCase):
         # Then
         self.assertTrue(found)
 
-    def test_given_unreachable_graylog_when_probing_then_reports_unknown_and_keeps_nothing(self):
+    @patch("graylog_mcp.infrastructure.graylog_api.time.sleep")
+    def test_given_unreachable_graylog_when_probing_then_reports_unknown_and_keeps_nothing(self, _sleep):
         # Given
         def unreachable(request):
             raise httpx.ConnectError("refused", request=request)

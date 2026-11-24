@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 
 from ..application.saved_views import SavedViewService
 from .responses import Responder
@@ -11,7 +12,7 @@ from .tool_annotations import READ_ONLY
 
 def register(server: MCPServer, service: SavedViewService, respond: Responder) -> None:
     @server.tool(title="Saved searches", annotations=READ_ONLY)
-    def saved_searches(query: str = "", limit: int = 50, next_cursor: str = "") -> str:
+    def saved_searches(query: str = "", limit: int = 50, next_cursor: str = "") -> CallToolResult:
         """List saved searches, so you can reuse queries your team already relies on.
 
         Args:
@@ -31,7 +32,7 @@ def register(server: MCPServer, service: SavedViewService, respond: Responder) -
         limit: int = 50,
         fields: str = "",
         next_cursor: str = "",
-    ) -> str:
+    ) -> CallToolResult:
         """Run a saved search with its stored query, stream and time range.
 
         Args:
@@ -53,7 +54,7 @@ def register(server: MCPServer, service: SavedViewService, respond: Responder) -
         )
 
     @server.tool(title="Dashboards", annotations=READ_ONLY)
-    def dashboards(query: str = "", limit: int = 50, next_cursor: str = "") -> str:
+    def dashboards(query: str = "", limit: int = 50, next_cursor: str = "") -> CallToolResult:
         """List dashboards, which show what your team monitors.
 
         Args:

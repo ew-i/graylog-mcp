@@ -76,11 +76,15 @@ _PRIVATE_KEY = re.compile(
     r"(?:-----END [A-Z0-9 ]*PRIVATE KEY[A-Z ]*-----|\Z)",
     re.DOTALL,
 )
-_CREDENTIAL_URL = re.compile(r"(?i)\b([a-z][a-z0-9+.-]*://[^/\s:@]*:)[^@\s/]+(@)")
+# The scheme must start a word: with `\b` a match can begin at every letter of a
+# run like `a.b.c…` and scan to its end each time (quadratic).
+_CREDENTIAL_URL = re.compile(r"(?i)(?<![a-z0-9+.-])([a-z][a-z0-9+.-]*://[^/\s:@]*:)[^@\s/]+(@)")
 _WEBHOOK_URL = re.compile(
     r"(?i)((?:hooks\.slack\.com/(?:services|workflows|triggers)"
     r"|discord(?:app)?\.com/api/webhooks"
-    r"|(?:[\w-]+\.)?webhook\.office\.com/webhookb2|outlook\.office(?:365)?\.com/webhook)/)"
+    # The prefix must start a word: unanchored, it retries at every character (quadratic).
+    r"|(?:(?<![\w-])[\w-]+\.)?webhook\.office\.com/webhookb2"
+    r"|outlook\.office(?:365)?\.com/webhook)/)"
     r"[\w@/-]+"
 )
 _SAS_SIGNATURE = re.compile(r"(?i)([?&]sig=)[^&\s#\"']+")

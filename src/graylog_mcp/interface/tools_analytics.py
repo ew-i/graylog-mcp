@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 
 from ..application.analytics import AnalyticsService
 from .responses import Responder
@@ -11,7 +12,7 @@ from .tool_annotations import READ_ONLY
 
 def register(server: MCPServer, service: AnalyticsService, respond: Responder) -> None:
     @server.tool(title="Count matches", annotations=READ_ONLY)
-    def count_matches(query: str, stream_id: str, range_seconds: int = 3600) -> str:
+    def count_matches(query: str, stream_id: str, range_seconds: int = 3600) -> CallToolResult:
         """Count messages matching a query without returning them. Cheap first check
         for "is this happening, and how often?".
 
@@ -32,7 +33,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
         interval: str = "",
         split_by: str = "",
         split_limit: int = 5,
-    ) -> str:
+    ) -> CallToolResult:
         """Message counts per time bucket (a histogram), optionally split by a field.
         Shows when something started, peaked or stopped. Uses the Search Scripting
         API (Graylog 5.1+).
@@ -60,7 +61,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
     @server.tool(title="Exact field counts", annotations=READ_ONLY)
     def exact_field_counts(
         query: str, field: str, stream_id: str, range_seconds: int = 86400, top_n: int = 20
-    ) -> str:
+    ) -> CallToolResult:
         """Exact top values of a field, counted by Graylog over every matching message
         (unlike rank_field_values, which samples). Uses the Search Scripting API
         (Graylog 5.1+).
@@ -87,7 +88,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
         baseline_offset_seconds: int = 86400,
         field: str = "",
         top_n: int = 10,
-    ) -> str:
+    ) -> CallToolResult:
         """Compare the most recent window with an earlier one of the same length
         (default: last hour vs. the same hour yesterday). Reports total change and,
         with `field`, which values rose, fell, appeared or disappeared. Per-value
@@ -123,7 +124,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
         percentiles: str = "50,90,99",
         group_by: str = "",
         group_limit: int = 10,
-    ) -> str:
+    ) -> CallToolResult:
         """Count, average, min, max, sum and percentiles of a numeric field such as a
         response time, optionally per value of another field. Uses the Search
         Scripting API (Graylog 5.1+).
@@ -160,7 +161,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
         context_field: str = "source",
         window_seconds: int = 300,
         fields: str = "",
-    ) -> str:
+    ) -> CallToolResult:
         """The messages logged just before and after one message, like `grep -C`.
         Neighbours share the anchor's value of `context_field` (e.g. the same source
         or pod; every item of a list value); leave it empty to use the whole stream.

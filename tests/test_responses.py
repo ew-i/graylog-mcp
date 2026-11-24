@@ -1,7 +1,9 @@
 import json
+import time
 import unittest
 
 from graylog_mcp.domain.errors import NotFoundError
+from graylog_mcp.interface import responses
 from graylog_mcp.interface.redaction import Redactor
 from graylog_mcp.interface.responses import Responder
 
@@ -17,7 +19,7 @@ def fail(exc):
 
 def redacted_message(message, redactor=None):
     responder = Responder(redactor) if redactor else respond
-    return json.loads(responder(lambda: {"message": message}))["message"]
+    return json.loads(responder.text(lambda: {"message": message}))["message"]
 
 
 class ResponseErrorTest(unittest.TestCase):
@@ -27,7 +29,7 @@ class ResponseErrorTest(unittest.TestCase):
 
         # When
         with self.assertNoLogs("graylog_mcp.interface.responses"):
-            result = json.loads(respond(action))
+            result = json.loads(respond.text(action))
 
         # Then
         self.assertEqual(result, {"error": "no such stream", "kind": "NotFound"})
@@ -38,7 +40,7 @@ class ResponseErrorTest(unittest.TestCase):
 
         # When
         with self.assertLogs("graylog_mcp.interface.responses", level="ERROR"):
-            result = json.loads(respond(action))
+            result = json.loads(respond.text(action))
 
         # Then
         self.assertEqual(result["kind"], "Internal")
@@ -68,7 +70,7 @@ class ResponseRedactionTest(unittest.TestCase):
         )
 
         # When
-        result = json.loads(respond(lambda: {key: f"value-for-{key}" for key in sensitive_keys}))
+        result = json.loads(respond.text(lambda: {key: f"value-for-{key}" for key in sensitive_keys}))
 
         # Then
         for key in sensitive_keys:
@@ -94,7 +96,7 @@ class ResponseRedactionTest(unittest.TestCase):
         )
 
         # When
-        result = json.loads(respond(lambda: dict.fromkeys(sensitive_keys, "value")))
+        result = json.loads(respond.text(lambda: dict.fromkeys(sensitive_keys, "value")))
 
         # Then
         for key in sensitive_keys:
@@ -117,7 +119,7 @@ class ResponseRedactionTest(unittest.TestCase):
         }
 
         # When
-        result = json.loads(respond(lambda: payload))
+        result = json.loads(respond.text(lambda: payload))
 
         # Then
         self.assertEqual(result, payload)
@@ -127,7 +129,7 @@ class ResponseRedactionTest(unittest.TestCase):
         payload = {"password_expired": True, "has_token": False, "secret": None, "token": 0}
 
         # When
-        result = json.loads(respond(lambda: payload))
+        result = json.loads(respond.text(lambda: payload))
 
         # Then
         self.assertEqual(result, {"password_expired": True, "has_token": False, "secret": None, "token": "[REDACTED]"})
@@ -271,7 +273,7 @@ class ResponseRedactionTest(unittest.TestCase):
 
     def test_given_secrets_in_mapping_keys_when_responding_then_redacts_the_keys(self):
         # When
-        result = json.loads(respond(lambda: {"counts": {"ghp_1234567890": 1}}))
+        result = json.loads(respond.text(lambda: {"counts": {"ghp_1234567890": 1}}))
 
         # Then
         self.assertEqual(result, {"counts": {"[REDACTED]": 1}})
@@ -292,7 +294,7 @@ class ResponseRedactionTest(unittest.TestCase):
         }
 
         # When
-        result = json.loads(respond(lambda: payload))
+        result = json.loads(respond.text(lambda: payload))
 
         # Then
         self.assertEqual(result["password"], "[REDACTED]")
@@ -313,7 +315,7 @@ class ConfiguredRedactionTest(unittest.TestCase):
         payload = {"employee_id": "e-123", "Internal_Note": "private", "manager_employee_id": "e-9", "_id": "m1"}
 
         # When
-        result = json.loads(Responder(redactor)(lambda: payload))
+        result = json.loads(Responder(redactor).text(lambda: payload))
 
         # Then
         self.assertEqual(
@@ -342,7 +344,7 @@ class FieldValueRedactionTest(unittest.TestCase):
         }
 
         # When
-        result = json.loads(respond(lambda: payload, fields=("session_id",)))
+        result = json.loads(respond.text(lambda: payload, fields=("session_id",)))
 
         # Then
         self.assertEqual(
@@ -363,7 +365,7 @@ class FieldValueRedactionTest(unittest.TestCase):
         payload = {"table": "api-keys", "key": "svc", "single_value": "k", "multi_value": {"v": "k"}, "has_error": False}
 
         # When
-        result = json.loads(respond(lambda: payload, fields=("api-keys",)))
+        result = json.loads(respond.text(lambda: payload, fields=("api-keys",)))
 
         # Then
         self.assertEqual(result["single_value"], "[REDACTED-1]")
@@ -375,7 +377,7 @@ class FieldValueRedactionTest(unittest.TestCase):
         payload = {"top_values": [{"value": "web-1", "count": 3}]}
 
         # When
-        result = json.loads(respond(lambda: payload, fields=("source", "")))
+        result = json.loads(respond.text(lambda: payload, fields=("source", "")))
 
         # Then
         self.assertEqual(result, payload)
@@ -389,7 +391,7 @@ class FieldValueRedactionTest(unittest.TestCase):
         }
 
         # When
-        result = json.loads(respond(lambda: payload))
+        result = json.loads(respond.text(lambda: payload))
 
         # Then
         self.assertEqual(
@@ -400,6 +402,95 @@ class FieldValueRedactionTest(unittest.TestCase):
                 "anchor": {"session_id": "[REDACTED]", "value": "kept"},
             },
         )
+
+
+class ResponseSizeTest(unittest.TestCase):
+    def test_given_a_long_value_when_responding_then_it_is_cut_with_a_marker(self):
+        # Given
+        long = "x" * (responses.MAX_VALUE_CHARS + 123)
+
+        # When
+        result = json.loads(respond.text(lambda: {"message": long, "level": "error"}))
+
+        # Then
+        self.assertEqual(result["message"], "x" * responses.MAX_VALUE_CHARS + "…[+123 chars]")
+        self.assertEqual(result["level"], "error")
+
+    def test_given_values_at_the_limit_or_not_strings_when_responding_then_they_are_kept(self):
+        # Given
+        payload = {"exact": "x" * responses.MAX_VALUE_CHARS, "count": 10**30, "flag": None}
+
+        # When / Then
+        self.assertEqual(json.loads(respond.text(lambda: payload)), payload)
+
+    def test_given_a_response_over_budget_when_responding_then_values_shrink_but_no_item_is_dropped(
+        self,
+    ):
+        # Given 100 messages of 9,000 characters: 900,000 in total
+        messages = [{"message": "y" * 9_000, "id": i} for i in range(100)]
+
+        # When
+        text = respond.text(lambda: {"messages": messages, "has_more": True})
+
+        # Then
+        result = json.loads(text)
+        self.assertLessEqual(len(text), responses.MAX_RESPONSE_CHARS)
+        self.assertEqual([m["id"] for m in result["messages"]], list(range(100)))
+        self.assertTrue(result["messages"][0]["message"].endswith("chars]"))
+        self.assertTrue(result["has_more"])
+
+    def test_given_a_response_too_big_even_at_the_floor_when_responding_then_stops_at_the_floor(
+        self,
+    ):
+        # Given
+        messages = [{"message": "z" * 2_000} for _ in range(1_000)]
+
+        # When
+        result = json.loads(respond.text(lambda: {"messages": messages}))
+
+        # Then
+        self.assertEqual(len(result["messages"]), 1_000)
+        self.assertTrue(result["messages"][0]["message"].startswith("z" * responses.MIN_VALUE_CHARS + "…"))
+
+    def test_given_a_secret_across_the_cut_when_responding_then_it_is_redacted_before_cutting(self):
+        # Given a token that would be split by the cut, leaving its start unredacted
+        token = "ghp_" + "a" * 36
+        message = "x" * (responses.MAX_VALUE_CHARS - 10) + " " + token
+
+        # When
+        result = json.loads(respond.text(lambda: {"message": message}))["message"]
+
+        # Then
+        self.assertNotIn("ghp_", result)
+
+    def test_given_non_ascii_text_when_responding_then_it_is_not_escaped(self):
+        self.assertIn("Größe", respond.text(lambda: {"message": "Größe"}))
+
+    def test_given_a_long_unbroken_value_when_redacting_then_time_grows_linearly(self):
+        # Given 500,000 characters per shape: each took minutes with quadratic patterns
+        for value in ("y" * 500_000, "a." * 250_000, "a-" * 250_000):
+            with self.subTest(shape=value[:4]):
+                # When
+                started = time.perf_counter()
+                Redactor().redact(value)
+
+                # Then
+                self.assertLess(time.perf_counter() - started, 2)
+
+    def test_given_long_keys_when_responding_then_keys_are_cut_and_the_budget_holds(self):
+        # Given count_over_time split by a field with long values, which become keys
+        counts = {"E" * 20_000 + str(v): 1 for v in range(5)}
+        payload = {"points": [{"time": str(t), "counts": counts} for t in range(20)]}
+
+        # When
+        text = respond.text(lambda: payload)
+
+        # Then every key survives, cut and marked with a hash of the full key, and no
+        # two collapse into one although they differ only in their last character
+        self.assertLessEqual(len(text), responses.MAX_RESPONSE_CHARS)
+        keys = json.loads(text)["points"][0]["counts"]
+        self.assertEqual(len(keys), 5)
+        self.assertTrue(all("chars, " in key for key in keys))
 
 
 if __name__ == "__main__":

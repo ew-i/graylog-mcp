@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from mcp.server.mcpserver import MCPServer
+from mcp.types import CallToolResult
 
 from ..application.incident import IncidentService
 from .responses import Responder
@@ -23,7 +24,7 @@ def register(server: MCPServer, service: IncidentService, respond: Responder) ->
         context_before: int = 3,
         context_after: int = 3,
         context_window_seconds: int = 300,
-    ) -> str:
+    ) -> CallToolResult:
         """Gather cluster health, alerts, baseline volume, log patterns, messages,
         nearby context, and stream/pipeline configuration for one incident query.
 

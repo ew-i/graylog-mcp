@@ -236,12 +236,25 @@ tables are paged. Responses carry `limit`, `next_cursor`, `has_more` and
   size, or the matches go deeper than Graylog can page (10,000 for logs and
   events).
 
+### Response size
+
+String values and keys longer than 10,000 characters are cut, ending in a
+marker such as `…[+52340 chars]`; a cut key also carries a short hash, so keys
+that differ only at the end stay apart. When a whole response would exceed 200,000 characters,
+values are cut shorter (down to 500) until it fits. Items are never dropped, so
+paging stays exact; ask for a smaller `limit` or fewer `fields` instead.
+
 ### Errors
 
 Tools never raise. A failure returns `{"error": ..., "kind": ...}`, for example
-`AccessDenied` or `Unsupported`. An unexpected internal error has kind
-`Internal` and is logged with its traceback to stderr. In
-`investigate_incident` it replaces only the failing section.
+`AccessDenied` or `Unsupported`, and is flagged as an error (`isError`) in the
+MCP result. An unexpected internal error has kind `Internal` and is logged with
+its traceback to stderr. In `investigate_incident` it replaces only the failing
+section.
+
+Temporary Graylog failures (HTTP 429, 502, 503, 504, a refused or dropped
+connection) are retried twice, after about 0.5 s and 1 s, honouring
+`Retry-After` up to 5 s. Timeouts are not retried.
 
 ## Resources
 
