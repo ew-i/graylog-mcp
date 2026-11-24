@@ -130,6 +130,20 @@ class McpToolsTest(unittest.TestCase):
         self.assertEqual(set(tools), EXPECTED_TOOLS)
         self.assertEqual(self.server.settings.log_level, "INFO")
 
+    def test_given_server_when_listing_tools_then_every_tool_is_titled_and_read_only(self):
+        # When
+        tools = self.tools()
+
+        # Then
+        for name, tool in tools.items():
+            with self.subTest(tool=name):
+                self.assertTrue(tool.title)
+                self.assertIsNotNone(tool.annotations)
+                self.assertIs(tool.annotations.read_only_hint, True)
+                self.assertIs(tool.annotations.destructive_hint, False)
+                self.assertIs(tool.annotations.idempotent_hint, True)
+                self.assertIs(tool.annotations.open_world_hint, True)
+
     def test_given_server_when_listing_tools_then_every_tool_is_documented(self):
         # When
         tools = self.tools()

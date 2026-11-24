@@ -453,6 +453,7 @@ src/graylog_mcp/
   interface/        MCP surface
     mcp_tools.py      ServiceBundle and build_server
     tools_*.py        tools, one module per area
+    tool_annotations.py  read-only hints shared by every tool
     resources.py      graylog:// resources with a short-lived cache
     prompts.py        workflow prompts
     query_guide.py    text of graylog://guide/query-syntax

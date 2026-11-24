@@ -6,10 +6,11 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.incident import IncidentService
 from .responses import Responder
+from .tool_annotations import READ_ONLY
 
 
 def register(server: MCPServer, service: IncidentService, respond: Responder) -> None:
-    @server.tool()
+    @server.tool(title="Investigate incident", annotations=READ_ONLY)
     def investigate_incident(
         query: str,
         stream_id: str,

@@ -6,10 +6,11 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.analytics import AnalyticsService
 from .responses import Responder
+from .tool_annotations import READ_ONLY
 
 
 def register(server: MCPServer, service: AnalyticsService, respond: Responder) -> None:
-    @server.tool()
+    @server.tool(title="Count matches", annotations=READ_ONLY)
     def count_matches(query: str, stream_id: str, range_seconds: int = 3600) -> str:
         """Count messages matching a query without returning them. Cheap first check
         for "is this happening, and how often?".
@@ -23,7 +24,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
             lambda: service.count_matches(text=query, stream_id=stream_id, seconds=range_seconds)
         )
 
-    @server.tool()
+    @server.tool(title="Count over time", annotations=READ_ONLY)
     def count_over_time(
         query: str,
         stream_id: str,
@@ -56,7 +57,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
             fields=(split_by,),
         )
 
-    @server.tool()
+    @server.tool(title="Exact field counts", annotations=READ_ONLY)
     def exact_field_counts(
         query: str, field: str, stream_id: str, range_seconds: int = 86400, top_n: int = 20
     ) -> str:
@@ -78,7 +79,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
             fields=(field,),
         )
 
-    @server.tool()
+    @server.tool(title="Compare time windows", annotations=READ_ONLY)
     def compare_windows(
         query: str,
         stream_id: str,
@@ -113,7 +114,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
             fields=(field,),
         )
 
-    @server.tool()
+    @server.tool(title="Field statistics", annotations=READ_ONLY)
     def field_stats(
         query: str,
         field: str,
@@ -149,7 +150,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
             fields=(group_by,),
         )
 
-    @server.tool()
+    @server.tool(title="Message context", annotations=READ_ONLY)
     def message_context(
         index: str,
         message_id: str,

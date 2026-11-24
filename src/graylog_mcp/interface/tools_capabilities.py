@@ -6,10 +6,11 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.capabilities import CapabilityService
 from .responses import Responder
+from .tool_annotations import READ_ONLY
 
 
 def register(server: MCPServer, service: CapabilityService, respond: Responder) -> None:
-    @server.tool()
+    @server.tool(title="Server capabilities", annotations=READ_ONLY)
     def server_capabilities() -> str:
         """Graylog version and which optional APIs it offers (server-side aggregation,
         time grouping, field types, query validation, paged streams), with the tools

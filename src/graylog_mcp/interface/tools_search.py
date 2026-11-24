@@ -6,16 +6,17 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.service import LogService
 from .responses import Responder
+from .tool_annotations import READ_ONLY
 
 
 def register(server: MCPServer, service: LogService, respond: Responder) -> None:
-    @server.tool()
+    @server.tool(title="Cluster status", annotations=READ_ONLY)
     def cluster_status() -> str:
         """Report Graylog version, node/cluster identity, hostname, timezone and
         whether message processing is running."""
         return respond(service.cluster_info)
 
-    @server.tool()
+    @server.tool(title="Browse streams", annotations=READ_ONLY)
     def browse_streams(limit: int = 50, next_cursor: str = "") -> str:
         """List the log streams you may query, with their IDs.
 
@@ -28,7 +29,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
                 filters, time range and page size come from the cursor."""
         return respond(lambda: service.streams(limit=limit, next_cursor=next_cursor))
 
-    @server.tool()
+    @server.tool(title="Find recent logs", annotations=READ_ONLY)
     def find_recent_logs(
         query: str,
         stream_id: str,
@@ -69,7 +70,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
             )
         )
 
-    @server.tool()
+    @server.tool(title="Find logs between two times", annotations=READ_ONLY)
     def find_logs_between(
         query: str,
         stream_id: str,
@@ -112,7 +113,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
             )
         )
 
-    @server.tool()
+    @server.tool(title="Validate query", annotations=READ_ONLY)
     def validate_query(query: str, stream_id: str, range_seconds: int = 86400) -> str:
         """Check a query's syntax and field names without running a search.
 
@@ -130,7 +131,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
             lambda: service.validate_query(text=query, stream_id=stream_id, seconds=range_seconds)
         )
 
-    @server.tool()
+    @server.tool(title="Read log message", annotations=READ_ONLY)
     def read_log_message(index: str, message_id: str, fields: str = "") -> str:
         """Fetch one message in full, using the _index and _id seen in search results.
 
@@ -141,7 +142,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         """
         return respond(lambda: service.message(index=index, message_id=message_id, fields=fields))
 
-    @server.tool()
+    @server.tool(title="Rank field values (sampled)", annotations=READ_ONLY)
     def rank_field_values(
         query: str,
         field: str,
@@ -170,7 +171,7 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
             fields=(field,),
         )
 
-    @server.tool()
+    @server.tool(title="Discover fields", annotations=READ_ONLY)
     def discover_fields(stream_id: str, range_seconds: int = 3600) -> str:
         """List a stream's fields with their type and whether each is groupable
         (usable by exact_field_counts, compare_windows, group_by) or numeric

@@ -6,10 +6,11 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.alerts import AlertService
 from .responses import Responder
+from .tool_annotations import READ_ONLY
 
 
 def register(server: MCPServer, service: AlertService, respond: Responder) -> None:
-    @server.tool()
+    @server.tool(title="Recent alerts", annotations=READ_ONLY)
     def recent_alerts(
         range_seconds: int = 86400,
         limit: int = 50,
@@ -41,7 +42,7 @@ def register(server: MCPServer, service: AlertService, respond: Responder) -> No
             )
         )
 
-    @server.tool()
+    @server.tool(title="Alert details", annotations=READ_ONLY)
     def alert_details(event_id: str, limit: int = 20) -> str:
         """Everything needed to triage one alert in a single call: the event, its
         definition (query, streams, window), the message that fired it (filter
@@ -54,7 +55,7 @@ def register(server: MCPServer, service: AlertService, respond: Responder) -> No
         """
         return respond(lambda: service.alert_details(event_id=event_id, limit=limit))
 
-    @server.tool()
+    @server.tool(title="Find related alerts", annotations=READ_ONLY)
     def find_related_alerts(event_id: str, range_seconds: int = 3600, limit: int = 50) -> str:
         """Other events (alerts or not) around an event's time that share its
         definition or any of its group-by values, e.g. the same host alerting under
@@ -71,7 +72,7 @@ def register(server: MCPServer, service: AlertService, respond: Responder) -> No
             )
         )
 
-    @server.tool()
+    @server.tool(title="Alert definitions", annotations=READ_ONLY)
     def alert_definitions(query: str = "", limit: int = 50, next_cursor: str = "") -> str:
         """The configured event/alert definitions: what each checks for (query and
         streams), how often it runs, and its priority.

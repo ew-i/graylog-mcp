@@ -6,10 +6,11 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.saved_views import SavedViewService
 from .responses import Responder
+from .tool_annotations import READ_ONLY
 
 
 def register(server: MCPServer, service: SavedViewService, respond: Responder) -> None:
-    @server.tool()
+    @server.tool(title="Saved searches", annotations=READ_ONLY)
     def saved_searches(query: str = "", limit: int = 50, next_cursor: str = "") -> str:
         """List saved searches, so you can reuse queries your team already relies on.
 
@@ -23,7 +24,7 @@ def register(server: MCPServer, service: SavedViewService, respond: Responder) -
             lambda: service.saved_searches(text=query, limit=limit, next_cursor=next_cursor)
         )
 
-    @server.tool()
+    @server.tool(title="Run saved search", annotations=READ_ONLY)
     def run_saved_search(
         view_id: str,
         stream_id: str = "",
@@ -51,7 +52,7 @@ def register(server: MCPServer, service: SavedViewService, respond: Responder) -
             )
         )
 
-    @server.tool()
+    @server.tool(title="Dashboards", annotations=READ_ONLY)
     def dashboards(query: str = "", limit: int = 50, next_cursor: str = "") -> str:
         """List dashboards, which show what your team monitors.
 

@@ -6,10 +6,11 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.operations import OperationsService
 from .responses import Responder
+from .tool_annotations import READ_ONLY
 
 
 def register(server: MCPServer, service: OperationsService, respond: Responder) -> None:
-    @server.tool()
+    @server.tool(title="Input status", annotations=READ_ONLY)
     def input_status(only_problems: bool = False) -> str:
         """Each log input and whether it is running on every node. Failed or stopped
         inputs usually explain logs that stopped arriving.
@@ -19,19 +20,19 @@ def register(server: MCPServer, service: OperationsService, respond: Responder) 
         """
         return respond(lambda: service.input_status(only_problems=only_problems))
 
-    @server.tool()
+    @server.tool(title="Throughput", annotations=READ_ONLY)
     def throughput() -> str:
         """Messages per second in and out, buffer usage and uncommitted journal entries,
         per node and in total. A growing journal means Graylog is falling behind."""
         return respond(service.throughput)
 
-    @server.tool()
+    @server.tool(title="System notifications", annotations=READ_ONLY)
     def system_notifications() -> str:
         """Graylog's own warnings (e.g. journal full, index failures, node not
         processing), urgent first."""
         return respond(service.notifications)
 
-    @server.tool()
+    @server.tool(title="Cluster nodes", annotations=READ_ONLY)
     def cluster_nodes() -> str:
         """Every Graylog node with version, leader flag, lifecycle and processing
         state, and whether it is healthy."""

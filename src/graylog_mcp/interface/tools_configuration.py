@@ -6,10 +6,11 @@ from mcp.server.mcpserver import MCPServer
 
 from ..application.configuration import ConfigurationService
 from .responses import Responder
+from .tool_annotations import READ_ONLY
 
 
 def register(server: MCPServer, service: ConfigurationService, respond: Responder) -> None:
-    @server.tool()
+    @server.tool(title="Stream rules", annotations=READ_ONLY)
     def stream_rules(stream_id: str) -> str:
         """Which messages a stream receives: its routing rules, in plain words.
 
@@ -18,7 +19,7 @@ def register(server: MCPServer, service: ConfigurationService, respond: Responde
         """
         return respond(lambda: service.stream_rules(stream_id=stream_id))
 
-    @server.tool()
+    @server.tool(title="Pipeline rules", annotations=READ_ONLY)
     def pipeline_rules(stream_id: str = "", include_source: bool = True) -> str:
         """Processing pipelines (all, or those connected to one stream) with their
         stages and rules. These can rename, drop or add fields.
@@ -31,7 +32,7 @@ def register(server: MCPServer, service: ConfigurationService, respond: Responde
             lambda: service.pipeline_rules(stream_id=stream_id, include_source=include_source)
         )
 
-    @server.tool()
+    @server.tool(title="Index sets", annotations=READ_ONLY)
     def index_sets(stream_id: str = "") -> str:
         """Index sets with rotation and retention settings, which tell you how far
         back logs can be searched.
@@ -41,7 +42,7 @@ def register(server: MCPServer, service: ConfigurationService, respond: Responde
         """
         return respond(lambda: service.index_sets(stream_id=stream_id))
 
-    @server.tool()
+    @server.tool(title="Lookup tables", annotations=READ_ONLY)
     def lookup_tables(query: str = "", limit: int = 50, next_cursor: str = "") -> str:
         """List lookup tables (e.g. IP to hostname, user ID to name) that lookup_value can use.
 
@@ -55,7 +56,7 @@ def register(server: MCPServer, service: ConfigurationService, respond: Responde
             lambda: service.lookup_tables(text=query, limit=limit, next_cursor=next_cursor)
         )
 
-    @server.tool()
+    @server.tool(title="Look up value", annotations=READ_ONLY)
     def lookup_value(table: str, key: str) -> str:
         """Look up a key in a lookup table.
 
