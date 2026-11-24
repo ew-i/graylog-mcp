@@ -312,9 +312,9 @@ matching flag is given. See [`.env.example`](.env.example) for a template.
 | `MCP_HOST`                            | `--host`                                                                     | `127.0.0.1` | HTTP listen host                                                  |
 | `MCP_PORT`                            | `--port`                                                                     | `8000`      | HTTP listen port                                                  |
 | `MCP_STREAMABLE_HTTP_PATH`            | `--streamable-http-path`                                                     | `/mcp`      | Streamable HTTP endpoint path                                     |
-| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | `--enable-dns-rebinding-protection` / `--no-enable-dns-rebinding-protection` | `false`     | Validate HTTP `Host` and `Origin` headers                         |
-| `MCP_ALLOWED_HOSTS`                   | `--allowed-hosts`                                                            | empty       | Comma-separated allowed `Host` values                             |
-| `MCP_ALLOWED_ORIGINS`                 | `--allowed-origins`                                                          | empty       | Comma-separated allowed `Origin` values                           |
+| `MCP_ENABLE_DNS_REBINDING_PROTECTION` | `--enable-dns-rebinding-protection` / `--no-enable-dns-rebinding-protection` | `true`      | Validate HTTP `Host` and `Origin` headers                         |
+| `MCP_ALLOWED_HOSTS`                   | `--allowed-hosts`                                                            | loopback    | Comma-separated allowed `Host` values                             |
+| `MCP_ALLOWED_ORIGINS`                 | `--allowed-origins`                                                          | loopback    | Comma-separated allowed `Origin` values                           |
 | `MCP_REDACT_FIELDS`                   | `--redact-fields`                                                            | empty       | Comma-separated extra field names to redact                       |
 | `MCP_RESOURCE_CACHE_SECONDS`          | `--resource-cache-seconds`                                                   | `60`        | Resource cache lifetime; `0` disables                             |
 | `MCP_LOG_LEVEL`                       | `--log-level`                                                                | `INFO`      | `DEBUG`, `INFO`, `WARNING`, `ERROR` or `CRITICAL`                 |
@@ -356,22 +356,20 @@ disabled.
 
 The Streamable HTTP endpoint does not authenticate clients. Keep it on
 `127.0.0.1` (the default), or put it behind a reverse proxy or network policy
-that does. When it must be reachable under a hostname, also enable
-DNS-rebinding protection and list the `Host` and browser `Origin` values
-clients send:
+that does.
+
+DNS-rebinding protection is on by default and accepts only loopback `Host` and
+`Origin` values, so a web page in your browser can't reach the server. When it
+must be reachable under a hostname, list the values clients send. They replace
+the loopback defaults, and `:*` matches any port:
 
 ```bash
 uv run graylog-mcp \
   --transport streamable-http \
   --host 0.0.0.0 \
-  --enable-dns-rebinding-protection \
-  --allowed-hosts mcp.example.com:8000 \
+  --allowed-hosts mcp.example.com:8000,localhost:* \
   --allowed-origins https://app.example
 ```
-
-With protection enabled, every request must carry an allowed `Host` and, when
-present, an allowed `Origin`. Values support the MCP SDK's `:*` port wildcard,
-such as `localhost:*` or `https://app.example:*`.
 
 The Docker image runs as an unprivileged user (`mcp`, UID 1000).
 

@@ -2,11 +2,18 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from pydantic import ValidationError
+from starlette.testclient import TestClient
 
-from graylog_mcp.infrastructure.config import ConfigError, Settings
+from graylog_mcp.infrastructure.config import (
+    LOCAL_HOSTS,
+    LOCAL_ORIGINS,
+    ConfigError,
+    Settings,
+)
+from graylog_mcp.interface.mcp_tools import build_server
 
 BASE = {"GRAYLOG_BASE_URL": "https://gl.example/", "GRAYLOG_API_TOKEN": "tok"}
 
@@ -179,6 +186,103 @@ class SettingsTest(unittest.TestCase):
         with patch.dict(os.environ, {**BASE, "GRAYLOG_VERIFY_TLS": " "}, clear=True):
             # When / Then
             self.assertTrue(Settings().validated().verify_tls)
+
+    def test_given_no_security_settings_when_loading_then_only_loopback_is_allowed(self):
+        # Given
+        with patch.dict(os.environ, BASE, clear=True):
+            settings = Settings().validated()
+
+        # When
+        security = settings.transport_security_settings().model_dump()
+
+        # Then
+        self.assertEqual(
+            security,
+            {
+                "enable_dns_rebinding_protection": True,
+                "allowed_hosts": ["127.0.0.1:*", "localhost:*", "[::1]:*"],
+                "allowed_origins": [
+                    "http://127.0.0.1:*",
+                    "http://localhost:*",
+                    "http://[::1]:*",
+                ],
+            },
+        )
+
+    def test_given_blank_security_settings_when_loading_then_defaults_apply(self):
+        # Given
+        blank = {
+            "enable_dns_rebinding_protection": " ",
+            "allowed_hosts": " ",
+            "allowed_origins": "",
+        }
+        with patch.dict(os.environ, BASE, clear=True):
+            # When
+            settings = Settings(**blank).validated()
+
+        # Then
+        self.assertTrue(settings.enable_dns_rebinding_protection)
+        self.assertEqual(settings.allowed_hosts, LOCAL_HOSTS)
+        self.assertEqual(settings.allowed_origins, LOCAL_ORIGINS)
+
+    def test_given_protection_disabled_when_building_security_then_it_is_off(self):
+        # Given
+        with patch.dict(os.environ, {**BASE, "MCP_ENABLE_DNS_REBINDING_PROTECTION": "false"}, clear=True):
+            settings = Settings().validated()
+
+        # When
+        security = settings.transport_security_settings()
+
+        # Then
+        self.assertFalse(security.enable_dns_rebinding_protection)
+
+
+class HttpTransportSecurityTest(unittest.TestCase):
+    """The default settings, applied by the MCP SDK to real HTTP requests."""
+
+    INITIALIZE = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "protocolVersion": "2025-06-18",
+            "capabilities": {},
+            "clientInfo": {"name": "test", "version": "1"},
+        },
+    }
+
+    def status_of(self, headers: dict[str, str]) -> int:
+        with patch.dict(os.environ, BASE, clear=True):
+            settings = Settings().validated()
+        app = build_server(Mock()).streamable_http_app(transport_security=settings.transport_security_settings())
+        with TestClient(app, base_url="http://127.0.0.1:8000") as client:
+            response = client.post(
+                "/mcp",
+                json=self.INITIALIZE,
+                headers={"Accept": "application/json, text/event-stream", **headers},
+            )
+        return response.status_code
+
+    def test_given_default_settings_when_a_local_client_connects_then_it_is_served(self):
+        for headers in (
+            {},
+            {"Host": "localhost:8000", "Origin": "http://localhost:8000"},
+            {"Host": "[::1]:8000"},
+        ):
+            with self.subTest(**headers):
+                # When / Then
+                self.assertEqual(self.status_of(headers), 200)
+
+    def test_given_default_settings_when_a_foreign_host_or_origin_connects_then_it_is_refused(
+        self,
+    ):
+        for headers, status in (
+            ({"Host": "attacker.example"}, 421),
+            ({"Origin": "http://attacker.example"}, 403),
+        ):
+            with self.subTest(**headers):
+                # When / Then
+                self.assertEqual(self.status_of(headers), status)
 
 
 if __name__ == "__main__":

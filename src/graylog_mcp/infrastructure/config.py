@@ -25,6 +25,11 @@ class ConfigError(GraylogMcpError):
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
 Transport = Literal["stdio", "streamable-http"]
 
+# Loopback only, as the MCP SDK allows when it is given no security settings.
+# Passing settings switches the SDK's own default off, so these must be explicit.
+LOCAL_HOSTS = "127.0.0.1:*,localhost:*,[::1]:*"
+LOCAL_ORIGINS = "http://127.0.0.1:*,http://localhost:*,http://[::1]:*"
+
 
 class Settings(BaseSettings):
     """Configuration with environment values available as argparse defaults."""
@@ -49,10 +54,10 @@ class Settings(BaseSettings):
     port: int = Field(8000, ge=1, le=65535, validation_alias="MCP_PORT")
     streamable_http_path: str = Field("/mcp", validation_alias="MCP_STREAMABLE_HTTP_PATH")
     enable_dns_rebinding_protection: bool = Field(
-        False, validation_alias="MCP_ENABLE_DNS_REBINDING_PROTECTION"
+        True, validation_alias="MCP_ENABLE_DNS_REBINDING_PROTECTION"
     )
-    allowed_hosts: str = Field("", validation_alias="MCP_ALLOWED_HOSTS")
-    allowed_origins: str = Field("", validation_alias="MCP_ALLOWED_ORIGINS")
+    allowed_hosts: str = Field(LOCAL_HOSTS, validation_alias="MCP_ALLOWED_HOSTS")
+    allowed_origins: str = Field(LOCAL_ORIGINS, validation_alias="MCP_ALLOWED_ORIGINS")
     redact_fields: str = Field("", validation_alias="MCP_REDACT_FIELDS")
     resource_cache_seconds: float = Field(
         60.0, ge=0, validation_alias="MCP_RESOURCE_CACHE_SECONDS"
@@ -73,12 +78,18 @@ class Settings(BaseSettings):
         return value.strip() if isinstance(value, str) else value
 
     @field_validator(
-        "verify_tls", "allow_insecure_http", "enable_dns_rebinding_protection", mode="before"
+        "verify_tls",
+        "allow_insecure_http",
+        "enable_dns_rebinding_protection",
+        "allowed_hosts",
+        "allowed_origins",
+        mode="before",
     )
     @classmethod
-    def blank_booleans_use_defaults(cls, value: str, info: ValidationInfo) -> bool | str:
+    def blanks_use_defaults(cls, value: object, info: ValidationInfo) -> object:
+        """A blank value (such as `--allowed-hosts ""`) means the default, not "none"."""
         if isinstance(value, str) and not value.strip():
-            return info.field_name == "verify_tls"
+            return cls.model_fields[info.field_name].default
         return value
 
     @field_validator("timeout_seconds", mode="before")
