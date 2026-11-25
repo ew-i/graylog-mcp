@@ -10,9 +10,7 @@ stream titles on others (6.3).
 
 from __future__ import annotations
 
-from typing import Any
-
-import httpx
+from typing import TYPE_CHECKING, Any
 
 from ..domain.aggregation import (
     AggregationQuery,
@@ -27,6 +25,9 @@ from ..domain.errors import BackendError, NotFoundError, UnsupportedError
 from .graylog_api import GraylogApi, timerange_json
 from .graylog_capabilities import AGGREGATE_PATH, NO_TIME_GROUPING, GraylogCapabilities
 
+if TYPE_CHECKING:
+    import httpx
+
 _STREAM_GROUP_LIMIT = 100
 _NO_AGGREGATION = "server-side aggregation needs the Search Scripting API (Graylog 5.1 or newer)"
 _NO_TIME_BUCKETS = (
@@ -35,7 +36,7 @@ _NO_TIME_BUCKETS = (
 )
 
 
-def _grouping_json(group) -> dict[str, Any]:
+def _grouping_json(group: object) -> dict[str, Any]:
     if isinstance(group, TimeGrouping):
         return {"field": group.field, "timeunit": group.interval}
     if isinstance(group, ValuesGrouping):
@@ -113,7 +114,7 @@ class GraylogAnalyticsStore:
             keys = tuple(_key(v) for v in raw[: len(groups)])
             cells = raw[len(groups) :]
             values = dict(zip(labels, cells[: len(labels)], strict=True))
-            if synthetic:
+            if synthetic and doc_count is not None:
                 count = cells[doc_count]
                 rows.append(
                     (count if isinstance(count, (int, float)) else 0, AggregationRow((), values))

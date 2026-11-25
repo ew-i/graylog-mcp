@@ -2,10 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
-from typing import Any
-
-import httpx
+from typing import TYPE_CHECKING, Any
 
 from ..domain.errors import InvalidRequestError
 from ..domain.models import Between, LastSeconds, ListingPage, ListingQuery, TimeWindow
@@ -14,12 +11,18 @@ from .graylog_api import (
     GraylogApi,
     first_list,
     integer,
+    mapping,
     objects,
     page_number,
     segment,
     text,
     total_count,
 )
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+
+    import httpx
 
 _LIST_KEYS = ("elements", "views", "dashboards", "saved_searches", "result")
 
@@ -97,7 +100,7 @@ class GraylogViewStore:
         search = self._api.get_object(f"/api/views/search/{segment(str(search_id))}")
         queries = objects(search.get("queries"))
         first = queries[0] if queries else {}
-        query_part = first.get("query") if isinstance(first.get("query"), dict) else {}
+        query_part = mapping(first.get("query"))
         window, keyword = _window(first.get("timerange"))
         streams = tuple(dict.fromkeys(_stream_ids([first.get("filter"), first.get("filters")])))
         return SavedQuery(

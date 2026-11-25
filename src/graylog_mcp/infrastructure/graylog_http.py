@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any
-
-import httpx
+from typing import TYPE_CHECKING, Any
 
 from ..domain.capabilities import Capability
 from ..domain.errors import AccessDeniedError, NotFoundError, UnsupportedError
@@ -27,6 +25,7 @@ from .graylog_api import (
     GraylogApi,
     build_http_client,
     integer,
+    mapping,
     objects,
     page_number,
     segment,
@@ -35,6 +34,9 @@ from .graylog_api import (
     total_count,
 )
 from .graylog_capabilities import GraylogCapabilities
+
+if TYPE_CHECKING:
+    import httpx
 
 __all__ = ["GraylogStore", "build_http_client"]
 
@@ -183,7 +185,7 @@ class GraylogStore:
             raise UnsupportedError(_NO_FIELD_TYPES) from exc
         fields = []
         for item in objects(items):
-            kind = item.get("type") if isinstance(item.get("type"), dict) else {}
+            kind = mapping(item.get("type"))
             properties = kind.get("properties")
             properties = properties if isinstance(properties, list) else []
             if item.get("name"):

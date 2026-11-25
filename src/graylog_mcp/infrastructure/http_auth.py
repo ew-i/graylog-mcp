@@ -20,12 +20,14 @@ import threading
 import time
 from collections.abc import Awaitable, Callable, Generator, MutableMapping
 from contextvars import ContextVar
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 
 from ..domain.errors import AccessDeniedError, BackendUnavailableError
-from .config import Settings
+
+if TYPE_CHECKING:
+    from .config import Settings
 
 Scope = MutableMapping[str, Any]
 Message = MutableMapping[str, Any]
@@ -49,7 +51,7 @@ def caller_token() -> str | None:
 
 
 def caller_scope() -> str:
-    """A stable, non-secret name for the current caller, for per-caller caches."""
+    """A stable, non-secret name for the current caller: per-caller caches, audit log."""
     token = _caller_token.get()
     return hashlib.sha256(token.encode()).hexdigest() if token else ""
 
@@ -73,8 +75,6 @@ class StaticTokenVerifier:
 
 
 class GraylogTokenVerifier:
-    """Asks Graylog whether a token is valid, and remembers valid ones briefly."""
-
     def __init__(
         self,
         client: httpx.Client,
@@ -108,21 +108,29 @@ class GraylogTokenVerifier:
             raise BackendUnavailableError(f"could not reach Graylog: {exc}") from exc
         if response.status_code >= 500:
             raise BackendUnavailableError(f"Graylog returned HTTP {response.status_code}")
-        # 403 means a valid token without permission for this path. Anything else
-        # (404 from a wrong base URL, 302 from an SSO proxy) proves nothing.
         return response.status_code in (200, 403)
 
 
 class BearerAuthMiddleware:
-    """Refuses HTTP requests without a bearer token the verifier accepts."""
+    """Refuses HTTP requests without a bearer token the verifier accepts.
 
-    def __init__(self, app: App, verify: Verifier, forward_token: bool = False) -> None:
+    `public_paths`, such as a health check, are served without a token.
+    """
+
+    def __init__(
+        self,
+        app: App,
+        verify: Verifier,
+        forward_token: bool = False,
+        public_paths: frozenset[str] = frozenset(),
+    ) -> None:
         self._app = app
         self._verify = verify
         self._forward_token = forward_token
+        self._public_paths = public_paths
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http":
+        if scope["type"] != "http" or scope.get("path") in self._public_paths:
             await self._app(scope, receive, send)
             return
         token = _bearer_token(scope)
@@ -147,14 +155,19 @@ class BearerAuthMiddleware:
             _caller_token.reset(reset)
 
 
-def protect(app: App, settings: Settings, client: httpx.Client) -> App:
-    """Wrap `app` in the authentication `settings.auth_mode` asks for."""
+def protect(
+    app: App, settings: Settings, client: httpx.Client, public_paths: frozenset[str] = frozenset()
+) -> App:
     if settings.auth_mode == "token":
         return BearerAuthMiddleware(
-            app, StaticTokenVerifier(settings.auth_token.get_secret_value())
+            app,
+            StaticTokenVerifier(settings.auth_token.get_secret_value()),
+            public_paths=public_paths,
         )
     if settings.auth_mode == "graylog":
-        return BearerAuthMiddleware(app, GraylogTokenVerifier(client), forward_token=True)
+        return BearerAuthMiddleware(
+            app, GraylogTokenVerifier(client), forward_token=True, public_paths=public_paths
+        )
     return app
 
 

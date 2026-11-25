@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from mcp.server.mcpserver import MCPServer
-from mcp.types import CallToolResult
+from typing import TYPE_CHECKING
 
-from ..application.alerts import AlertService
-from .responses import Responder
+from mcp.types import CallToolResult  # noqa: TC002 - the MCP SDK reads tool annotations
+
 from .tool_annotations import READ_ONLY
+
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
+
+    from ..application.alerts import AlertService
+    from .responses import Responder
 
 
 def register(server: MCPServer, service: AlertService, respond: Responder) -> None:

@@ -15,15 +15,17 @@ from __future__ import annotations
 import base64
 import binascii
 import json
-from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any, TypeGuard
 
 from ..domain.errors import InvalidRequestError
 from ..domain.models import Between, JsonDict, LastSeconds, ListingPage, ListingQuery, TimeWindow
 from ..domain.timeutil import format_timestamp
 from .policy import clamp
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _INVALID = "next_cursor is invalid"
 
@@ -38,7 +40,8 @@ class Page:
 
     @property
     def limit(self) -> int:
-        return self.request["limit"]
+        limit: int = self.request["limit"]
+        return limit
 
     def value(self, name: str, kind: type = str) -> Any:
         """A stored request value, checked because a cursor may have been edited."""
@@ -191,5 +194,5 @@ def _decode(cursor: str) -> tuple[JsonDict, int]:
     return request, offset
 
 
-def _is_count(value: Any) -> bool:
+def _is_count(value: Any) -> TypeGuard[int]:
     return isinstance(value, int) and not isinstance(value, bool) and value >= 0

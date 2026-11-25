@@ -3,13 +3,18 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import TYPE_CHECKING
 
 from ..domain.errors import InvalidRequestError
 from ..domain.models import Between, JsonDict, LastSeconds
 from .pagination import listing
 from .policy import Limits
-from .ports import ViewStore
-from .service import LogService
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from .ports import ViewStore
+    from .service import LogService
 
 _FALLBACK_SECONDS = 900
 
@@ -60,7 +65,7 @@ class SavedViewService:
         view_id: str,
         stream_id: str = "",
         limit: int = 50,
-        fields: str = "",
+        fields: str | Iterable[str] = "",
         next_cursor: str = "",
     ) -> JsonDict:
         if not view_id.strip():

@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import TYPE_CHECKING
 
 from ..domain.errors import InvalidRequestError, NotFoundError
-from ..domain.models import JsonDict
 from .pagination import listing
 from .policy import Limits
-from .ports import ConfigStore
+
+if TYPE_CHECKING:
+    from ..domain.models import JsonDict
+    from .ports import ConfigStore
 
 
 def _require(value: str, name: str) -> str:

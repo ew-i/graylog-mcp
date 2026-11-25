@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from mcp.server.mcpserver import MCPServer
-from mcp.types import CallToolResult
+from typing import TYPE_CHECKING
 
-from ..application.saved_views import SavedViewService
-from .responses import Responder
+from mcp.types import CallToolResult  # noqa: TC002 - the MCP SDK reads tool annotations
+
 from .tool_annotations import READ_ONLY
+
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
+
+    from ..application.saved_views import SavedViewService
+    from .responses import Responder
 
 
 def register(server: MCPServer, service: SavedViewService, respond: Responder) -> None:
@@ -30,7 +35,7 @@ def register(server: MCPServer, service: SavedViewService, respond: Responder) -
         view_id: str,
         stream_id: str = "",
         limit: int = 50,
-        fields: str = "",
+        fields: tuple[str, ...] = (),
         next_cursor: str = "",
     ) -> CallToolResult:
         """Run a saved search with its stored query, stream and time range.
@@ -39,7 +44,7 @@ def register(server: MCPServer, service: SavedViewService, respond: Responder) -
             view_id: ID from saved_searches.
             stream_id: Optional override; required when the saved search has no stream.
             limit: Maximum messages returned (1-1000).
-            fields: Optional comma-separated field names to return.
+            fields: Optional field names to return, e.g. ["source", "message"].
             next_cursor: A previous response's next_cursor. Continues that exact request:
                 filters, time range and page size come from the cursor.
         """

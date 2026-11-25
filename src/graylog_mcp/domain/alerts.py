@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .errors import InvalidRequestError
-from .models import TimeWindow
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from .models import TimeWindow
 
 _PRIORITY_LABELS = {1: "low", 2: "normal", 3: "high", 4: "critical"}
 

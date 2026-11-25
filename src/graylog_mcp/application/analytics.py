@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..domain.aggregation import (
     AggregationQuery,
@@ -20,12 +20,17 @@ from ..domain.models import Between, JsonDict, LogEntry, LogQuery, Sort, SortDir
 from ..domain.timeutil import format_timestamp, parse_timestamp
 from .policy import Clock, Limits, clamp, parse_field_list, parse_percentiles
 from .policy import utc_now as _utc_now
-from .ports import AggregationStore, MessageStore
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+    from ..domain.aggregation import Grouping
+    from .ports import AggregationStore, MessageStore
 
 
 def _lucene_phrase(value: Any) -> str:
     if isinstance(value, bool):
-        value = "true" if value else "false"  # str(True) is "True"; the index stores true
+        value = "true" if value else "false"
     text = str(value).replace("\\", "\\\\").replace('"', '\\"')
     return f'"{text}"'
 
@@ -73,7 +78,7 @@ class AnalyticsService:
         try:
             return self._agg.aggregate(query)
         except BackendError as exc:
-            if type(exc) is not BackendError:  # unreachable, denied, unsupported, ...
+            if type(exc) is not BackendError:
                 raise
             fields = dict.fromkeys(
                 [g.field for g in query.groups if isinstance(g, ValuesGrouping)]
@@ -123,7 +128,7 @@ class AnalyticsService:
                 f"interval {interval} would produce {buckets} buckets "
                 f"(max {self._limits.max_buckets}); use a larger interval or a shorter range"
             )
-        groups: list = [TimeGrouping(interval)]
+        groups: list[Grouping] = [TimeGrouping(interval)]
         split = split_by.strip()
         if split:
             groups.append(ValuesGrouping(split, clamp(split_limit, 1, 20)))
@@ -178,7 +183,7 @@ class AnalyticsService:
                 (Metric("count", descending=True),),
             )
         )
-        values = sorted(
+        values: list[JsonDict] = sorted(
             ({"value": r.keys[0], "count": int(r.values.get("count") or 0)} for r in table.rows),
             key=lambda v: -v["count"],
         )
@@ -211,7 +216,7 @@ class AnalyticsService:
             format_timestamp(base_end - timedelta(seconds=length)), format_timestamp(base_end)
         )
 
-        def total(window) -> int:
+        def total(window: Between) -> int:
             return self._logs.search(
                 LogQuery(text=text, stream_id=stream_id, window=window, max_results=1)
             ).total_hits
@@ -228,7 +233,7 @@ class AnalyticsService:
         if name:
             name = require_field_name(name)
 
-            def counts(window) -> dict[str, int]:
+            def counts(window: Between) -> dict[str, int]:
                 table = self._aggregate(
                     AggregationQuery(
                         text,
@@ -285,7 +290,7 @@ class AnalyticsService:
         stream_id: str,
         field: str,
         seconds: int,
-        percentiles: str = "50,90,99",
+        percentiles: str | Iterable[float] = "50,90,99",
         group_by: str = "",
         group_limit: int = 10,
     ) -> JsonDict:
@@ -307,7 +312,7 @@ class AnalyticsService:
         )
         table = self._aggregate(AggregationQuery(text, stream_id, window, groups, tuple(metrics)))
 
-        def stats(values) -> JsonDict:
+        def stats(values: Mapping[str, Any]) -> JsonDict:
             out = {m.label.split("(")[0]: values.get(m.label) for m in metrics}
             out["count"] = int(out.get("count") or 0)
             return out
@@ -332,7 +337,7 @@ class AnalyticsService:
         after: int = 5,
         context_field: str = "source",
         window_seconds: int = 300,
-        fields: str = "",
+        fields: str | Iterable[str] = "",
     ) -> JsonDict:
         if not index.strip() or not message_id.strip():
             raise InvalidRequestError("both index and message_id are required")

@@ -7,17 +7,19 @@ models only reject values that are meaningless.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from enum import Enum
-from typing import Any
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
 
 from .errors import InvalidRequestError
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 JsonDict = dict[str, Any]
 
 
-class SortDirection(str, Enum):
+class SortDirection(StrEnum):
     ASC = "asc"
     DESC = "desc"
 

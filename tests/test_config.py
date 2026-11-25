@@ -2,6 +2,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from typing import Any, ClassVar
 from unittest.mock import Mock, patch
 
 from pydantic import ValidationError
@@ -238,7 +239,7 @@ class SettingsTest(unittest.TestCase):
 
 
 class AuthSettingsTest(unittest.TestCase):
-    HTTP = {**BASE, "MCP_TRANSPORT": "streamable-http"}
+    HTTP: ClassVar[dict[str, str]] = {**BASE, "MCP_TRANSPORT": "streamable-http"}
 
     def test_given_no_auth_settings_when_loading_then_auth_is_off(self):
         with patch.dict(os.environ, BASE, clear=True):
@@ -305,7 +306,7 @@ class AuthSettingsTest(unittest.TestCase):
 class HttpTransportSecurityTest(unittest.TestCase):
     """The default settings, applied by the MCP SDK to real HTTP requests."""
 
-    INITIALIZE = {
+    INITIALIZE: ClassVar[dict[str, Any]] = {
         "jsonrpc": "2.0",
         "id": 1,
         "method": "initialize",

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import argparse
 import sys
-from collections.abc import Sequence
+from typing import TYPE_CHECKING
 
 import httpx
 import uvicorn
 from pydantic import ValidationError
 
+from . import __version__
 from .application.alerts import AlertService
 from .application.analytics import AnalyticsService
 from .application.capabilities import CapabilityService
@@ -27,9 +28,12 @@ from .infrastructure.graylog_http import GraylogStore
 from .infrastructure.graylog_system import GraylogSystemStore
 from .infrastructure.graylog_views import GraylogViewStore
 from .infrastructure.http_auth import caller_scope, caller_token, protect
-from .interface.mcp_tools import ServiceBundle, build_server
+from .interface.mcp_tools import HEALTH_PATH, ServiceBundle, build_server
 from .interface.redaction import Redactor
 from .interface.resources import CACHE_SECONDS
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 
 def wire(http: httpx.Client, cache_seconds: float = CACHE_SECONDS) -> ServiceBundle:
@@ -147,6 +151,10 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     per_caller = settings.auth_mode == "graylog"
     with build_http_client(settings) as http:
+        ok, message = check_graylog(http, settings.base_url, check_token=not per_caller)
+        print(f"graylog-mcp {__version__}: {message}", file=sys.stderr)
+        if not ok:
+            return 1
         server = build_server(
             wire(http, settings.resource_cache_seconds),
             log_level=settings.log_level,
@@ -159,7 +167,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 ),
                 current_secret=caller_token if per_caller else lambda: None,
             ),
-            cache_scope=caller_scope if per_caller else lambda: "",
+            caller_id=caller_scope if per_caller else lambda: "",
         )
         if settings.transport == "streamable-http":
             app = server.streamable_http_app(
@@ -168,7 +176,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 host=settings.host,
             )
             uvicorn.run(
-                protect(app, settings, http),
+                protect(app, settings, http, public_paths=frozenset({HEALTH_PATH})),
                 host=settings.host,
                 port=settings.port,
                 log_level=settings.log_level.lower(),
@@ -176,6 +184,40 @@ def main(argv: Sequence[str] | None = None) -> int:
         else:
             server.run(transport=settings.transport)
     return 0
+
+
+def check_graylog(http: httpx.Client, base_url: str, check_token: bool) -> tuple[bool, str]:
+    """Ask Graylog at startup, so a wrong URL or token fails now with a clear
+    message instead of on the first tool call. Returns (start?, what to report).
+
+    Graylog names its version at /api/ without a login, so URL and version are
+    checked in every auth mode. The token is checked only when the server has one:
+    in graylog auth mode each client's token is checked when it connects. An
+    unreachable or failing Graylog only warns: it may be restarting, and the
+    server works as soon as Graylog answers.
+    """
+    try:
+        hello = http.get("/api/", auth=None)
+        token_status = http.get("/api/system").status_code if check_token else None
+    except httpx.RequestError as exc:
+        return True, f"warning: cannot reach Graylog at {base_url} yet ({exc}); starting anyway"
+    if hello.status_code >= 500:
+        return True, (
+            f"warning: Graylog at {base_url} answered HTTP {hello.status_code}; starting anyway"
+        )
+    try:
+        version = hello.json()["version"] if hello.status_code == 200 else None
+    except (ValueError, KeyError, TypeError):
+        version = None
+    if version is None:
+        return False, (
+            f"{base_url} does not look like the Graylog API (HTTP {hello.status_code} "
+            "for /api/); check GRAYLOG_BASE_URL"
+        )
+    if token_status == 401:
+        return False, f"Graylog {version} at {base_url} rejected GRAYLOG_API_TOKEN (HTTP 401)"
+    tokens = "" if check_token else "; each client's Graylog token is checked when it connects"
+    return True, f"connected to Graylog {version} at {base_url}{tokens}"
 
 
 if __name__ == "__main__":

@@ -32,6 +32,9 @@ jobs:
       - name: Formatting
         run: uv run ruff format --check --diff src tests
 
+      - name: Types (mypy)
+        run: uv run mypy
+
   test:
     name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest

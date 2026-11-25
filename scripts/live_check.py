@@ -491,7 +491,7 @@ class Run:
                 field="duration_ms",
                 stream_id=s,
                 range_seconds=3600,
-                percentiles="50",
+                percentiles=[50],
             )
             if body is None:
                 return "Unsupported (pre-5.1)"

@@ -59,6 +59,12 @@ standard input. Usually you don't start it by hand: point your MCP client at it
 `GRAYLOG_BASE_URL` must use `https://`. For a local Graylog over plain HTTP, also
 set `GRAYLOG_ALLOW_INSECURE_HTTP=true`.
 
+At startup the server reads Graylog's version from `/api/`, which needs no
+login, and then checks `GRAYLOG_API_TOKEN`. A URL that isn't the Graylog API or
+a rejected token stops it with a clear message; an unreachable Graylog only
+warns, and the server starts anyway. In `graylog` auth mode there is no server
+token, so each client's token is checked when it connects.
+
 ## Connect an MCP client
 
 ### Local install (stdio)
@@ -250,11 +256,19 @@ Tools never raise. A failure returns `{"error": ..., "kind": ...}`, for example
 `AccessDenied` or `Unsupported`, and is flagged as an error (`isError`) in the
 MCP result. An unexpected internal error has kind `Internal` and is logged with
 its traceback to stderr. In `investigate_incident` it replaces only the failing
-section.
+section. Its sections run at the same time, and a section Graylog hasn't
+answered within 60 s is reported as `BackendUnavailable`.
 
 Temporary Graylog failures (HTTP 429, 502, 503, 504, a refused or dropped
 connection) are retried twice, after about 0.5 s and 1 s, honouring
 `Retry-After` up to 5 s. Timeouts are not retried.
+
+### Audit log
+
+Every tool call is logged to stderr at `INFO` (`MCP_LOG_LEVEL=WARNING` turns it
+off), as one JSON line after `tool_call`: tool, redacted arguments, duration,
+outcome and error kind. In `graylog` auth mode, `caller` is a short hash of the
+client's token, the same for every call that client makes.
 
 ## Resources
 
@@ -408,6 +422,11 @@ uv run graylog-mcp \
 
 The Docker image runs as an unprivileged user (`mcp`, UID 1000).
 
+In HTTP mode, `GET /healthz` answers `{"status": "ok", "version": ...}` without
+a token, for load balancers and orchestrators. The image's `HEALTHCHECK` probes
+it when `MCP_TRANSPORT=streamable-http` is set; a stdio container counts as
+healthy while it runs.
+
 ## Development
 
 ```bash
@@ -488,12 +507,14 @@ src/graylog_mcp/
     mcp_tools.py      ServiceBundle and build_server
     tools_*.py        tools, one module per area
     tool_annotations.py  read-only hints shared by every tool
+    audit.py          one log line per tool call
     resources.py      graylog:// resources with a short-lived cache
     prompts.py        workflow prompts
     query_guide.py    text of graylog://guide/query-syntax
     redaction.py      credential redaction
     responses.py      response and error shaping
   cli.py            argparse entrypoint and composition root
+  healthcheck.py    Docker HEALTHCHECK for the HTTP endpoint
 tests/              domain, services (with fakes), adapters (httpx MockTransport),
                     MCP round trips
 scripts/            live check against a real Graylog (not in CI)

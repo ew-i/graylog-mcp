@@ -98,7 +98,7 @@ class Settings(BaseSettings):
     @classmethod
     def blanks_use_defaults(cls, value: object, info: ValidationInfo) -> object:
         """A blank value (such as `--allowed-hosts ""`) means the default, not "none"."""
-        if isinstance(value, str) and not value.strip():
+        if isinstance(value, str) and not value.strip() and info.field_name:
             return cls.model_fields[info.field_name].default
         return value
 

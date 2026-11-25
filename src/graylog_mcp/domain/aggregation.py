@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from .errors import InvalidRequestError
 from .models import TimeWindow, require_scope
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 _INTERVAL = re.compile(r"^([1-9][0-9]*)([smhdwMy])$")
 _UNIT_SECONDS = {
@@ -102,7 +105,7 @@ class Metric:
 
     @property
     def label(self) -> str:
-        if self.function == "percentile":
+        if self.function == "percentile" and self.percentile is not None:
             p = self.percentile
             name = f"p{int(p)}" if p == int(p) else f"p{p}"
         else:
@@ -132,7 +135,7 @@ class AggregationQuery:
 @dataclass(frozen=True)
 class AggregationRow:
     keys: tuple[str | None, ...]  # one per grouping, in query order
-    values: Mapping[str, object]  # metric label -> value (None when unavailable)
+    values: Mapping[str, Any]  # metric label -> value (None when unavailable)
 
 
 @dataclass(frozen=True)

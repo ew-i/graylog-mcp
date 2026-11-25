@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
 from graylog_mcp.domain.aggregation import AggregationQuery, AggregationTable
 from graylog_mcp.domain.alerts import Event, EventDefinition, EventPage, EventQuery
@@ -29,13 +29,17 @@ from graylog_mcp.domain.models import (
     SearchPage,
     Stream,
 )
-from graylog_mcp.domain.operations import (
-    InputStatus,
-    NodeStatus,
-    NodeThroughput,
-    SystemNotification,
-)
-from graylog_mcp.domain.views import SavedQuery, ViewSummary
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from graylog_mcp.domain.operations import (
+        InputStatus,
+        NodeStatus,
+        NodeThroughput,
+        SystemNotification,
+    )
+    from graylog_mcp.domain.views import SavedQuery, ViewSummary
 
 
 def _listing(items: list, query: ListingQuery) -> ListingPage:

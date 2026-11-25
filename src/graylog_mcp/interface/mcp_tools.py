@@ -6,21 +6,16 @@ Each area registers its own tools; none of them raise. Failures become
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from mcp.server.mcpserver import MCPServer
+from starlette.responses import JSONResponse
 
-from ..application.alerts import AlertService
-from ..application.analytics import AnalyticsService
-from ..application.capabilities import CapabilityService
-from ..application.configuration import ConfigurationService
+from .. import __version__
 from ..application.incident import IncidentService
-from ..application.operations import OperationsService
-from ..application.saved_views import SavedViewService
-from ..application.service import LogService
 from . import (
+    audit,
     prompts,
     redaction,
     resources,
@@ -34,6 +29,19 @@ from . import (
     tools_views,
 )
 from .responses import Responder
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from starlette.requests import Request
+
+    from ..application.alerts import AlertService
+    from ..application.analytics import AnalyticsService
+    from ..application.capabilities import CapabilityService
+    from ..application.configuration import ConfigurationService
+    from ..application.operations import OperationsService
+    from ..application.saved_views import SavedViewService
+    from ..application.service import LogService
 
 
 @dataclass(frozen=True)
@@ -54,6 +62,8 @@ INSTRUCTIONS = (
     "server_capabilities says which tools this Graylog version cannot serve."
 )
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+# Liveness for container orchestration; http_auth lets it through without a token.
+HEALTH_PATH = "/healthz"
 
 
 def build_server(
@@ -62,12 +72,25 @@ def build_server(
     log_level: LogLevel = "INFO",
     resource_cache_seconds: float = resources.CACHE_SECONDS,
     redactor: redaction.Redactor | None = None,
-    cache_scope: Callable[[], str] = lambda: "",
+    caller_id: Callable[[], str] = lambda: "",
 ) -> MCPServer:
-    """`cache_scope` names the current caller when callers see different Graylog
-    data (each with their own token), so cached resources stay per caller."""
-    server = MCPServer(name, instructions=INSTRUCTIONS, log_level=log_level)
-    respond = Responder(redactor or redaction.Redactor())
+    """`caller_id` names the current caller when callers see different Graylog data
+    (each with their own token): cached resources stay per caller, and the audit
+    log says who called a tool."""
+    redactor = redactor or redaction.Redactor()
+    server = MCPServer(
+        name,
+        instructions=INSTRUCTIONS,
+        version=__version__,
+        log_level=log_level,
+        middleware=[audit.tool_call_logger(redactor, caller_id)],
+    )
+
+    @server.custom_route(HEALTH_PATH, methods=["GET"])  # type: ignore[untyped-decorator]  # SDK
+    async def health(request: Request) -> JSONResponse:
+        return JSONResponse({"status": "ok", "version": __version__})
+
+    respond = Responder(redactor)
     tools_search.register(server, services.search, respond)
     tools_analytics.register(server, services.analytics, respond)
     tools_alerts.register(server, services.alerts, respond)
@@ -76,7 +99,7 @@ def build_server(
     tools_configuration.register(server, services.configuration, respond)
     tools_capabilities.register(server, services.capabilities, respond)
     resources.register(
-        server, services, respond, resources.TtlCache(resource_cache_seconds, scope=cache_scope)
+        server, services, respond, resources.TtlCache(resource_cache_seconds, scope=caller_id)
     )
     prompts.register(server)
     tools_incident.register(

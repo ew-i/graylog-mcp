@@ -1,3 +1,6 @@
+import contextvars
+import threading
+import time
 import unittest
 from unittest.mock import create_autospec
 
@@ -117,6 +120,99 @@ class IncidentServiceTest(unittest.TestCase):
         )
         self.assertEqual(result["configuration"]["pipelines"], {"total": 1})
         self.assertEqual(result["nearby_context"], {"before": [], "after": []})
+
+    def test_given_slow_sections_when_investigating_then_they_run_at_the_same_time(self):
+        # Given every Graylog call takes 0.2 s; 10 sections in a row would take 2 s
+        def slow(answer):
+            def call(*args, **kwargs):
+                time.sleep(0.2)
+                return answer
+
+            return call
+
+        self.search.cluster_info.side_effect = slow({"version": "6.1"})
+        self.operations.cluster_nodes.side_effect = slow({"healthy": 1})
+        self.analytics.exact_field_counts.side_effect = slow({"top_values": []})
+        self.configuration.pipeline_rules.side_effect = slow({"total": 1})
+
+        # When
+        started = time.perf_counter()
+        result = self.service.investigate(query="*", stream_id="s1")
+
+        # Then
+        self.assertLess(time.perf_counter() - started, 1.0)
+        self.assertEqual(result["cluster_health"]["nodes"], {"healthy": 1})
+
+    def test_given_a_section_past_the_deadline_when_investigating_then_reports_it_and_keeps_the_rest(
+        self,
+    ):
+        # Given
+        release = threading.Event()
+        self.configuration.stream_rules.side_effect = lambda **_: release.wait(5) and {}
+        self.addCleanup(release.set)
+        service = IncidentService(
+            self.search,
+            self.analytics,
+            self.alerts,
+            self.operations,
+            self.configuration,
+            deadline_seconds=0.2,
+        )
+
+        # When
+        started = time.perf_counter()
+        result = service.investigate(query="*", stream_id="s1")
+
+        # Then
+        self.assertLess(time.perf_counter() - started, 2)
+        self.assertEqual(result["configuration"]["stream"]["kind"], "BackendUnavailable")
+        self.assertIn("0.2 s", result["configuration"]["stream"]["error"])
+        self.assertEqual(result["recent_alerts"], {"total": 1})
+
+    def test_given_a_late_message_search_when_investigating_then_reports_it_without_context(self):
+        # Given
+        release = threading.Event()
+        self.search.search_recent.side_effect = lambda **_: release.wait(5) and {}
+        self.addCleanup(release.set)
+        service = IncidentService(
+            self.search,
+            self.analytics,
+            self.alerts,
+            self.operations,
+            self.configuration,
+            deadline_seconds=0.2,
+        )
+
+        # When
+        result = service.investigate(query="*", stream_id="s1")
+
+        # Then
+        self.assertEqual(result["representative_messages"]["kind"], "BackendUnavailable")
+        self.assertIsNone(result["nearby_context"])
+
+    def test_given_a_context_variable_when_investigating_then_every_section_sees_it(self):
+        # Given a per-request value, like the client's Graylog token in http_auth
+        caller = contextvars.ContextVar("caller", default=None)
+        seen = []
+
+        def record(answer):
+            def call(*args, **kwargs):
+                seen.append(caller.get())
+                return answer
+
+            return call
+
+        self.search.cluster_info.side_effect = record({})
+        self.search.search_recent.side_effect = record({"messages": []})
+        self.configuration.stream_rules.side_effect = record({})
+        token = caller.set("alice")
+        self.addCleanup(caller.reset, token)
+
+        # When
+        self.service.investigate(query="*", stream_id="s1")
+
+        # Then
+        self.assertEqual(seen, ["alice"] * 3)
 
 
 if __name__ == "__main__":

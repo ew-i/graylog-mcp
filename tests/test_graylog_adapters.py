@@ -825,6 +825,24 @@ class SystemAdapterTest(unittest.TestCase):
         # When / Then
         self.assertEqual(store.throughput()[0].node_id, "local")
 
+    def test_given_a_metric_without_a_known_value_key_when_reading_throughput_then_reports_none(self):
+        # Given a metric shape this adapter doesn't know (no value, count or rate)
+        metrics = {
+            "metrics": [
+                {
+                    "full_name": "org.graylog2.throughput.input.1-sec-rate",
+                    "metric": {"mean": 3.5},
+                }
+            ]
+        }
+        store, _ = make(GraylogSystemStore, {("POST", "/api/system/metrics/multiple"): metrics})
+
+        # When
+        [node] = store.throughput()
+
+        # Then
+        self.assertIsNone(node.metrics["input_per_second"])
+
     def test_given_notification_when_listing_then_keeps_severity_and_details(self):
         # Given
         store, _ = make(

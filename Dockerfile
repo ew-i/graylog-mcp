@@ -37,4 +37,8 @@ ENV PATH="/app/.venv/bin:${PATH}"
 
 USER mcp
 
+# Probes /healthz when MCP_TRANSPORT=streamable-http; a stdio server counts as healthy.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD ["python", "-m", "graylog_mcp.healthcheck"]
+
 ENTRYPOINT ["graylog-mcp"]

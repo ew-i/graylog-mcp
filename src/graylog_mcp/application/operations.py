@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import asdict
+from typing import TYPE_CHECKING
 
-from ..domain.models import JsonDict
-from .ports import SystemStore
+if TYPE_CHECKING:
+    from ..domain.models import JsonDict
+    from .ports import SystemStore
 
 _SEVERITY_ORDER = {"urgent": 0, "normal": 1}
 

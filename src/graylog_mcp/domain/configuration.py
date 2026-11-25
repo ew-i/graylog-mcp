@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 # Graylog's StreamRuleType codes -> (name, verb phrase used in descriptions)
-STREAM_RULE_TYPES = {
+STREAM_RULE_TYPES: dict[int | None, tuple[str, str]] = {
     1: ("exact", "match exactly"),
     2: ("regex", "match regular expression"),
     3: ("greater", "be greater than"),

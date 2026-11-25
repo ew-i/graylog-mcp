@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from ..domain.capabilities import Capability
-from ..domain.models import JsonDict
-from .ports import CapabilityStore, StreamCatalog
+
+if TYPE_CHECKING:
+    from ..domain.models import JsonDict
+    from .ports import CapabilityStore, StreamCatalog
 
 # capability: (what it provides, what happens without it, tools that return Unsupported)
 _EFFECTS: dict[Capability, tuple[str, str, tuple[str, ...]]] = {

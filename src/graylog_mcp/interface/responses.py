@@ -5,13 +5,16 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
-from collections.abc import Callable, Iterable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from mcp.types import CallToolResult, TextContent
 
 from ..domain.errors import GraylogMcpError, error_payload
-from .redaction import Redactor
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+    from .redaction import Redactor
 
 _log = logging.getLogger(__name__)
 
@@ -49,7 +52,6 @@ class Responder:
             if not isinstance(exc, GraylogMcpError):
                 _log.exception("tool failed unexpectedly")
             payload, failed = error_payload(exc), True
-        # Shorten after redacting, so a cut can never split a secret the redactor would match.
         return failed, fit(self._redactor.redact(payload, fields))
 
 
@@ -57,7 +59,7 @@ def fit(payload: Any) -> str:
     """Serialize `payload`, cutting long string values until it fits the budget."""
     limit = MAX_VALUE_CHARS
     while True:
-        text = _dumps(_shorten(payload, limit))
+        text = _dumps(shorten(payload, limit))
         if len(text) <= MAX_RESPONSE_CHARS or limit <= MIN_VALUE_CHARS:
             return text
         limit = max(limit // 4, MIN_VALUE_CHARS)
@@ -67,19 +69,19 @@ def _dumps(payload: Any) -> str:
     return json.dumps(payload, ensure_ascii=False, default=str)
 
 
-def _shorten(value: Any, limit: int) -> Any:
+def shorten(value: Any, limit: int) -> Any:
+    """Cut string values and keys longer than `limit`, marking how much is missing."""
     if isinstance(value, str) and len(value) > limit:
         return f"{value[:limit]}…[+{len(value) - limit} chars]"
     if isinstance(value, dict):
-        # Keys can be field values too, such as the per-value counts of count_over_time.
-        return {_shorten_key(key, limit): _shorten(item, limit) for key, item in value.items()}
+        return {_shorten_key(key, limit): shorten(item, limit) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_shorten(item, limit) for item in value]
+        return [shorten(item, limit) for item in value]
     return value
 
 
 def _shorten_key(key: Any, limit: int) -> Any:
-    """Like _shorten, plus a hash of the full key, so keys that differ only after the
+    """Like shorten, plus a hash of the full key, so keys that differ only after the
     cut stay separate instead of overwriting each other's value."""
     if not isinstance(key, str) or len(key) <= limit:
         return key

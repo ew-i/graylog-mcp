@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-import httpx
+from typing import TYPE_CHECKING, Any
 
 from ..domain.alerts import Event, EventDefinition, EventPage, EventQuery
 from ..domain.errors import NotFoundError
@@ -13,6 +11,8 @@ from .graylog_api import (
     GraylogApi,
     first_list,
     integer,
+    listing,
+    mapping,
     objects,
     page_number,
     segment,
@@ -20,6 +20,9 @@ from .graylog_api import (
     timerange_json,
     total_count,
 )
+
+if TYPE_CHECKING:
+    import httpx
 
 
 class GraylogAlertStore:
@@ -42,7 +45,7 @@ class GraylogAlertStore:
                 "sort_direction": "desc",
             },
         )
-        context = body.get("context") if isinstance(body.get("context"), dict) else {}
+        context = mapping(body.get("context"))
         definitions = context.get("event_definitions")
         titles = {
             def_id: (entry or {}).get("title")
@@ -106,9 +109,10 @@ class GraylogAlertStore:
 
 
 def _event(item: dict[str, Any], titles: dict[str | None, Any]) -> Event:
-    raw = item.get("event") if isinstance(item.get("event"), dict) else item
+    event = item.get("event")
+    raw = event if isinstance(event, dict) else item
     definition_id = text(raw.get("event_definition_id"))
-    streams = raw.get("source_streams") if isinstance(raw.get("source_streams"), list) else []
+    streams = listing(raw.get("source_streams"))
     group_by = raw.get("group_by_fields")
     return Event(
         id=str(raw.get("id", "")),
@@ -120,7 +124,7 @@ def _event(item: dict[str, Any], titles: dict[str | None, Any]) -> Event:
         alert=bool(raw.get("alert", False)),
         source=text(raw.get("source")),
         key=text(raw.get("key")),
-        fields=raw.get("fields") if isinstance(raw.get("fields"), dict) else {},
+        fields=mapping(raw.get("fields")),
         origin_context=text(raw.get("origin_context")),
         timerange_start=text(raw.get("timerange_start")),
         timerange_end=text(raw.get("timerange_end")),
@@ -130,8 +134,8 @@ def _event(item: dict[str, Any], titles: dict[str | None, Any]) -> Event:
 
 
 def _definition(item: dict[str, Any]) -> EventDefinition:
-    config = item.get("config") if isinstance(item.get("config"), dict) else {}
-    streams = config.get("streams") if isinstance(config.get("streams"), list) else []
+    config = mapping(item.get("config"))
+    streams = listing(config.get("streams"))
     return EventDefinition(
         id=str(item.get("id", "")),
         title=text(item.get("title")),

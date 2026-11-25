@@ -6,10 +6,7 @@ older setups) the node-local variant is used and reported as node "local".
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, TypeVar
-
-import httpx
+from typing import TYPE_CHECKING, Any, TypeVar
 
 from ..domain.errors import NotFoundError
 from ..domain.operations import (
@@ -19,7 +16,12 @@ from ..domain.operations import (
     NodeThroughput,
     SystemNotification,
 )
-from .graylog_api import GraylogApi, number, objects, text
+from .graylog_api import GraylogApi, mapping, number, objects, text
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import httpx
 
 T = TypeVar("T")
 
@@ -70,11 +72,7 @@ class GraylogSystemStore:
         states: dict[str, list[InputNodeState]] = {}
         for node, entries in states_by_node.items():
             for entry in entries:
-                nested = (
-                    entry.get("message_input")
-                    if isinstance(entry.get("message_input"), dict)
-                    else {}
-                )
+                nested = mapping(entry.get("message_input"))
                 input_id = entry.get("id") or nested.get("id")
                 if not input_id:
                     continue
@@ -138,7 +136,7 @@ class GraylogSystemStore:
                 node_id=text(n.get("node_id")),
                 title=text(n.get("title")),
                 description=text(n.get("description")),
-                details=n.get("details") if isinstance(n.get("details"), dict) else {},
+                details=mapping(n.get("details")),
             )
             for n in objects(body.get("notifications"))
         ]

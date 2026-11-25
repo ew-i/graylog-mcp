@@ -9,16 +9,19 @@ from __future__ import annotations
 
 import random
 import time
-from collections.abc import Iterable, Mapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote
 
 import httpx
 
 from ..domain.errors import AccessDeniedError, BackendError, BackendUnavailableError, NotFoundError
 from ..domain.models import Between, LastSeconds, TimeWindow
-from .config import Settings
 from .http_auth import CallerTokenAuth
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable, Mapping
+
+    from .config import Settings
 
 
 def build_http_client(settings: Settings) -> httpx.Client:
@@ -128,7 +131,7 @@ MAX_RETRY_WAIT_SECONDS = 5.0
 
 def _backoff(attempt: int) -> float:
     """0.5 s, then 1 s, each with up to 50% jitter so clients don't retry in step."""
-    return 0.5 * 2**attempt * (1 + random.random() / 2)
+    return 0.5 * 2.0**attempt * (1 + random.random() / 2)
 
 
 def _retry_after(response: httpx.Response) -> float | None:
@@ -209,6 +212,16 @@ def number(value: Any) -> float | None:
 def objects(value: Any) -> list[dict[str, Any]]:
     """Keep only the dict items of a list (anything else -> [])."""
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
+def mapping(value: Any) -> dict[str, Any]:
+    """A JSON object, or {} for anything else (Graylog omits or nulls optional parts)."""
+    return value if isinstance(value, dict) else {}
+
+
+def listing(value: Any) -> list[Any]:
+    """A JSON array, or [] for anything else."""
+    return value if isinstance(value, list) else []
 
 
 def first_list(body: Mapping[str, Any], keys: Iterable[str]) -> list[dict[str, Any]]:

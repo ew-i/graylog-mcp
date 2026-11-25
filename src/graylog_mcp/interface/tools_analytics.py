@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from mcp.server.mcpserver import MCPServer
-from mcp.types import CallToolResult
+from typing import TYPE_CHECKING
 
-from ..application.analytics import AnalyticsService
-from .responses import Responder
+from mcp.types import CallToolResult  # noqa: TC002 - the MCP SDK reads tool annotations
+
 from .tool_annotations import READ_ONLY
+
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
+
+    from ..application.analytics import AnalyticsService
+    from .responses import Responder
 
 
 def register(server: MCPServer, service: AnalyticsService, respond: Responder) -> None:
@@ -121,7 +126,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
         field: str,
         stream_id: str,
         range_seconds: int = 3600,
-        percentiles: str = "50,90,99",
+        percentiles: tuple[float, ...] = (50, 90, 99),
         group_by: str = "",
         group_limit: int = 10,
     ) -> CallToolResult:
@@ -134,7 +139,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
             field: Numeric field to summarise.
             stream_id: Required. Access is enforced per stream; get IDs from browse_streams.
             range_seconds: Look-back window (default 1 h).
-            percentiles: Comma-separated percentiles, e.g. '50,95,99.9'. Empty for none.
+            percentiles: Percentiles to compute, e.g. [50, 95, 99.9]. Empty for none.
             group_by: Optional field; statistics are computed per value.
             group_limit: How many groups to return (1-100).
         """
@@ -160,7 +165,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
         after: int = 5,
         context_field: str = "source",
         window_seconds: int = 300,
-        fields: str = "",
+        fields: tuple[str, ...] = (),
     ) -> CallToolResult:
         """The messages logged just before and after one message, like `grep -C`.
         Neighbours share the anchor's value of `context_field` (e.g. the same source
@@ -175,7 +180,7 @@ def register(server: MCPServer, service: AnalyticsService, respond: Responder) -
             context_field: Field neighbours must share with the anchor,
                 e.g. source or kubernetes_pod_name.
             window_seconds: How far to look on each side (max 24 h).
-            fields: Optional comma-separated field names to return.
+            fields: Optional field names to return, e.g. ["source", "message"].
         """
         return respond(
             lambda: service.message_context(

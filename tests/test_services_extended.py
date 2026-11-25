@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from graylog_mcp.application.alerts import AlertService
 from graylog_mcp.application.capabilities import CapabilityService
@@ -41,7 +41,7 @@ from .fakes import (
     FakeViewStore,
 )
 
-NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
 
 
 class AlertServiceTest(unittest.TestCase):
@@ -325,6 +325,19 @@ class AlertServiceTest(unittest.TestCase):
             [("01B", ["same definition"]), ("01C", ["same source"])],
         )
         self.assertIn("newest 4 of 9", result["note"])
+
+    def test_given_every_event_in_the_window_when_finding_related_then_adds_no_note(self):
+        # Given all 2 events of the window fit in one page
+        target = Event("01A", "d1", None, "2026-10-07T12:00:00.000Z", "m", 1, True, None, None, {})
+        other = Event("01B", "d1", None, "2026-10-07T12:01:00.000Z", "m", 1, True, None, None, {})
+        self.store.page = EventPage(2, (target, other), 2)
+
+        # When
+        result = self.service.find_related_alerts(event_id="01A", seconds=600)
+
+        # Then
+        self.assertEqual([e["id"] for e in result["related"]], ["01B"])
+        self.assertNotIn("note", result)
 
 
 class SavedViewServiceTest(unittest.TestCase):

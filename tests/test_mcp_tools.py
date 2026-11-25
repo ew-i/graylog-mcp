@@ -3,6 +3,9 @@ import json
 import unittest
 from unittest.mock import Mock
 
+from mcp.server.mcpserver.exceptions import ToolError
+
+from graylog_mcp import __version__
 from graylog_mcp.application.alerts import AlertService
 from graylog_mcp.application.analytics import AnalyticsService
 from graylog_mcp.application.capabilities import CapabilityService
@@ -129,6 +132,7 @@ class McpToolsTest(unittest.TestCase):
         # Then
         self.assertEqual(set(tools), EXPECTED_TOOLS)
         self.assertEqual(self.server.settings.log_level, "INFO")
+        self.assertEqual(self.server.version, __version__)
 
     def test_given_server_when_listing_tools_then_every_tool_is_titled_and_read_only(self):
         # When
@@ -145,6 +149,23 @@ class McpToolsTest(unittest.TestCase):
                 self.assertIs(tool.annotations.open_world_hint, True)
                 # No output schema: the JSON goes out once, as text, not again as a string.
                 self.assertIsNone(tool.output_schema)
+
+    def test_given_typed_parameters_when_listing_tools_then_the_schema_shows_lists_and_choices(self):
+        # When
+        tools = self.tools()
+        search = tools["find_recent_logs"].input_schema["properties"]
+        stats = tools["field_stats"].input_schema["properties"]
+
+        # Then
+        self.assertEqual(search["fields"]["type"], "array")
+        self.assertEqual(search["fields"]["items"], {"type": "string"})
+        self.assertEqual(search["sort_order"]["enum"], ["asc", "desc"])
+        self.assertEqual(stats["percentiles"]["items"], {"type": "number"})
+
+    def test_given_a_value_outside_the_choices_when_calling_then_the_call_is_rejected(self):
+        # When / Then (over the wire the SDK turns this into an isError result)
+        with self.assertRaisesRegex(ToolError, "sort_order"):
+            asyncio.run(self.server.call_tool("find_recent_logs", {"query": "*", "stream_id": "s1", "sort_order": "sideways"}))
 
     def test_given_a_failing_tool_when_calling_then_the_result_is_flagged_as_an_error(self):
         # When
@@ -301,7 +322,7 @@ class McpToolsTest(unittest.TestCase):
                     "stream_id": "s1",
                     "seconds": 123,
                     "limit": 7,
-                    "fields": "source,message",
+                    "fields": ("source", "message"),
                     "sort_field": "source",
                     "sort_order": "asc",
                     "next_cursor": "",
@@ -316,7 +337,7 @@ class McpToolsTest(unittest.TestCase):
                     "start": "2026-01-01T00:00:00Z",
                     "end": "2026-01-01T01:00:00Z",
                     "limit": 7,
-                    "fields": "source,message",
+                    "fields": ("source", "message"),
                     "sort_field": "source",
                     "sort_order": "asc",
                     "next_cursor": "",
@@ -325,7 +346,7 @@ class McpToolsTest(unittest.TestCase):
             "read_log_message": (
                 search,
                 "message",
-                {"index": "idx", "message_id": "msg", "fields": "source"},
+                {"index": "idx", "message_id": "msg", "fields": ("source",)},
             ),
             "rank_field_values": (
                 search,
@@ -376,7 +397,7 @@ class McpToolsTest(unittest.TestCase):
                     "stream_id": "s1",
                     "field": "duration",
                     "seconds": 123,
-                    "percentiles": "50,95",
+                    "percentiles": (50, 95),
                     "group_by": "source",
                     "group_limit": 3,
                 },
@@ -392,7 +413,7 @@ class McpToolsTest(unittest.TestCase):
                     "after": 3,
                     "context_field": "source",
                     "window_seconds": 123,
-                    "fields": "message",
+                    "fields": ("message",),
                 },
             ),
             "recent_alerts": (
@@ -430,7 +451,7 @@ class McpToolsTest(unittest.TestCase):
                     "view_id": "view-1",
                     "stream_id": "s1",
                     "limit": 3,
-                    "fields": "message",
+                    "fields": ("message",),
                     "next_cursor": "",
                 },
             ),
@@ -467,7 +488,7 @@ class McpToolsTest(unittest.TestCase):
                 "stream_id": "s1",
                 "range_seconds": 123,
                 "limit": 7,
-                "fields": "source,message",
+                "fields": ("source", "message"),
                 "sort": "source",
                 "sort_order": "asc",
             },
@@ -477,7 +498,7 @@ class McpToolsTest(unittest.TestCase):
                 "from_time": "2026-01-01T00:00:00Z",
                 "to_time": "2026-01-01T01:00:00Z",
                 "limit": 7,
-                "fields": "source,message",
+                "fields": ("source", "message"),
                 "sort": "source",
                 "sort_order": "asc",
             },
@@ -519,7 +540,7 @@ class McpToolsTest(unittest.TestCase):
                 "stream_id": "s1",
                 "field": "duration",
                 "range_seconds": 123,
-                "percentiles": "50,95",
+                "percentiles": (50, 95),
                 "group_by": "source",
                 "group_limit": 3,
             },

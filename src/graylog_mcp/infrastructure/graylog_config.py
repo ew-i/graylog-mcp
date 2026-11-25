@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
-
-import httpx
+from typing import TYPE_CHECKING, Any
 
 from ..domain.configuration import (
     IndexSet,
@@ -30,6 +28,9 @@ from .graylog_api import (
     text,
     total_count,
 )
+
+if TYPE_CHECKING:
+    import httpx
 
 
 def _strategy(class_name: Any, config: Any) -> Strategy:

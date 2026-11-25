@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from graylog_mcp.application.policy import parse_percentiles
 from graylog_mcp.domain.aggregation import (
@@ -70,7 +70,8 @@ class MetricTest(unittest.TestCase):
     def test_given_percentile_lists_when_parsing_then_deduplicates_valid_and_rejects_invalid_values(self):
         # When / Then
         self.assertEqual(parse_percentiles("50, 50, 99.9"), (50.0, 99.9))
-        for raw in ("nope", "0", "101"):
+        self.assertEqual(parse_percentiles([50, 50.0, 99.9]), (50.0, 99.9))
+        for raw in ("nope", "0", "101", [0], [101]):
             with self.subTest(raw=raw), self.assertRaises(InvalidRequestError):
                 parse_percentiles(raw)
 
@@ -100,7 +101,7 @@ class AggregationQueryTest(unittest.TestCase):
 class TimeUtilTest(unittest.TestCase):
     def test_given_graylog_timestamp_variants_when_parsing_then_returns_the_same_utc_instant(self):
         # Given
-        expected = datetime(2026, 3, 15, 10, 0, 0, 123000, tzinfo=timezone.utc)
+        expected = datetime(2026, 3, 15, 10, 0, 0, 123000, tzinfo=UTC)
 
         # When / Then
         self.assertEqual(parse_timestamp("2026-03-15T10:00:00.123Z"), expected)

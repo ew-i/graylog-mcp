@@ -29,8 +29,11 @@ class FakeServer:
 
 
 class ClientContext:
-    def __init__(self):
-        self.client = httpx.Client(base_url="https://gl.example")
+    """A Graylog client whose server answers the startup check like Graylog 7.2."""
+
+    def __init__(self, reply=None):
+        reply = reply or (lambda request: httpx.Response(200, json={"version": "7.2.0"}))
+        self.client = httpx.Client(base_url="https://gl.example", transport=httpx.MockTransport(reply))
 
     def __enter__(self):
         return self.client
@@ -371,7 +374,7 @@ class CompositionRootTest(unittest.TestCase):
 
                 # Then
                 self.assertIsInstance(run.call_args.args[0], BearerAuthMiddleware)
-                self.assertEqual(stderr, "")
+                self.assertNotIn("warning", stderr)
 
     def test_given_graylog_mode_when_running_main_then_caches_and_redaction_follow_the_caller(
         self,
@@ -397,8 +400,145 @@ class CompositionRootTest(unittest.TestCase):
 
         # Then
         options = build_server.call_args.kwargs
-        self.assertIs(options["cache_scope"], entry.caller_scope)
+        self.assertIs(options["caller_id"], entry.caller_scope)
         self.assertIs(options["redactor"]._current_secret, entry.caller_token)
+
+
+class StartupCheckTest(unittest.TestCase):
+    """/api/ answers without a login (Graylog 5.1 to 7.2); /api/system needs the token."""
+
+    GRAYLOG = httpx.Response(200, json={"version": "7.2.2", "tagline": "Manage your logs"})
+
+    def graylog(self, hello=None, system=None):
+        """A Graylog answering /api/ with `hello` and /api/system with `system`."""
+        self.requests = []
+
+        def reply(request):
+            self.requests.append((request.url.path, "authorization" in request.headers))
+            if request.url.path == "/api/":
+                return hello or self.GRAYLOG
+            return system or httpx.Response(200, json={"version": "7.2.2"})
+
+        return ClientContext(reply).client
+
+    def check(self, check_token=True, **replies):
+        client = self.graylog(**replies)
+        client.auth = ("server-token", "token")
+        return entry.check_graylog(client, "https://gl.example", check_token)
+
+    def test_given_graylog_answers_when_checking_then_starts_or_explains_why_not(self):
+        for replies, starts, says in (
+            ({}, True, "connected to Graylog 7.2.2 at https://gl.example"),
+            ({"system": httpx.Response(403)}, True, "connected to Graylog 7.2.2"),
+            ({"system": httpx.Response(401)}, False, "Graylog 7.2.2 at https://gl.example rejected"),
+            ({"hello": httpx.Response(503)}, True, "warning: Graylog at https://gl.example answered"),
+            ({"hello": httpx.Response(404)}, False, "check GRAYLOG_BASE_URL"),
+            ({"hello": httpx.Response(302)}, False, "HTTP 302"),  # an SSO proxy's login redirect
+            ({"hello": httpx.Response(200, text="<html>")}, False, "does not look like"),
+            ({"hello": httpx.Response(200, json={"name": "x"})}, False, "does not look like"),
+        ):
+            with self.subTest(**{k: f"{v.status_code} {v.text[:10]}" for k, v in replies.items()}):
+                # When
+                ok, message = self.check(**replies)
+
+                # Then
+                self.assertIs(ok, starts)
+                self.assertIn(says, message)
+
+    def test_given_any_mode_when_checking_then_reads_the_version_without_sending_a_token(self):
+        # When
+        self.check()
+
+        # Then: only the token check carries the token
+        self.assertEqual(self.requests, [("/api/", False), ("/api/system", True)])
+
+    def test_given_no_server_token_when_checking_then_checks_url_and_version_only(self):
+        # When
+        ok, message = self.check(check_token=False, system=httpx.Response(401))
+
+        # Then
+        self.assertTrue(ok)
+        self.assertIn("connected to Graylog 7.2.2", message)
+        self.assertIn("each client's Graylog token is checked when it connects", message)
+        self.assertEqual(self.requests, [("/api/", False)])
+
+    def test_given_graylog_unreachable_when_checking_then_warns_and_starts(self):
+        # Given
+        def unreachable(request):
+            raise httpx.ConnectError("refused", request=request)
+
+        # When
+        ok, message = entry.check_graylog(ClientContext(unreachable).client, "https://gl.example", True)
+
+        # Then
+        self.assertTrue(ok)
+        self.assertIn("cannot reach Graylog", message)
+
+    def start(self, environment, reply):
+        """Run main() against a fake Graylog, with the HTTP client main() really builds."""
+        stderr = io.StringIO()
+        with patch.dict(os.environ, environment, clear=True):
+            client = entry.build_http_client(entry.parse_args([]))
+        client._transport = httpx.MockTransport(reply)
+        with (
+            patch.dict(os.environ, environment, clear=True),
+            patch.object(entry, "build_http_client", return_value=client),
+            patch.object(entry, "build_server", return_value=FakeServer()) as build_server,
+            patch.object(entry.uvicorn, "run"),
+            redirect_stderr(stderr),
+        ):
+            code = entry.main([])
+        return code, stderr.getvalue(), build_server
+
+    def test_given_a_rejected_token_when_starting_then_exits_with_one_before_serving(self):
+        # When
+        code, stderr, build_server = self.start(
+            {"GRAYLOG_BASE_URL": "https://gl.example", "GRAYLOG_API_TOKEN": "wrong"},
+            lambda r: self.GRAYLOG if r.url.path == "/api/" else httpx.Response(401),
+        )
+
+        # Then
+        self.assertEqual(code, 1)
+        self.assertIn("rejected GRAYLOG_API_TOKEN", stderr)
+        build_server.assert_not_called()
+
+    def test_given_graylog_mode_when_starting_then_checks_graylog_without_a_token(self):
+        # Given no server token: the client's CallerTokenAuth refuses any authenticated call
+        requests = []
+
+        def graylog(request):
+            requests.append((request.url.path, "authorization" in request.headers))
+            return self.GRAYLOG
+
+        # When
+        code, stderr, _ = self.start(
+            {
+                "GRAYLOG_BASE_URL": "https://gl.example",
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_AUTH_MODE": "graylog",
+            },
+            graylog,
+        )
+
+        # Then
+        self.assertEqual(code, 0)
+        self.assertIn("connected to Graylog 7.2.2", stderr)
+        self.assertEqual(requests, [("/api/", False)])
+
+    def test_given_graylog_mode_and_a_wrong_url_when_starting_then_exits_with_one(self):
+        # When
+        code, stderr, _ = self.start(
+            {
+                "GRAYLOG_BASE_URL": "https://gl.example",
+                "MCP_TRANSPORT": "streamable-http",
+                "MCP_AUTH_MODE": "graylog",
+            },
+            lambda request: httpx.Response(404),
+        )
+
+        # Then
+        self.assertEqual(code, 1)
+        self.assertIn("check GRAYLOG_BASE_URL", stderr)
 
 
 if __name__ == "__main__":

@@ -10,17 +10,18 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
-
-from mcp.server.mcpserver import MCPServer
 
 from ..application.policy import Limits
 from .query_guide import QUERY_SYNTAX
-from .responses import Responder
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from mcp.server.mcpserver import MCPServer
+
     from .mcp_tools import ServiceBundle
+    from .responses import Responder
 
 CACHE_SECONDS = 60.0  # default; MCP_RESOURCE_CACHE_SECONDS / --resource-cache-seconds
 # Catalogue resources return one page of the listing maximum; `has_more` and

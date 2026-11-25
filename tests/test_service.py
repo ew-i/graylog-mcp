@@ -1,7 +1,7 @@
 import base64
 import json
 import unittest
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from graylog_mcp.application.pagination import open_page
 from graylog_mcp.application.service import Limits, LogService, parse_field_list
@@ -20,7 +20,7 @@ from graylog_mcp.domain.models import (
 
 from .fakes import FakeLogStore
 
-NOW = datetime(2026, 10, 7, 12, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 10, 7, 12, 0, tzinfo=UTC)
 
 
 def _cursor(payload) -> str:
@@ -35,6 +35,11 @@ class ParseFieldListTest(unittest.TestCase):
     def test_given_empty_text_when_parsing_fields_then_returns_no_fields(self):
         # When / Then
         self.assertEqual(parse_field_list(""), ())
+
+    def test_given_a_list_when_parsing_fields_then_trims_dedupes_and_drops_blanks(self):
+        # When / Then
+        self.assertEqual(parse_field_list([" a", "b", "", "a", "c "]), ("a", "b", "c"))
+        self.assertEqual(parse_field_list(()), ())
 
     def test_given_malformed_cursors_when_opening_page_then_rejects_each_cursor(self):
         # Given

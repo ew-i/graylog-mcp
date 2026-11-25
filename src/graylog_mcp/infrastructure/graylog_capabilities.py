@@ -11,14 +11,16 @@ from __future__ import annotations
 
 import threading
 import time
-from collections.abc import Callable
-from typing import Any
-
-import httpx
+from typing import TYPE_CHECKING, Any
 
 from ..domain.capabilities import Capability
 from ..domain.errors import BackendError, BackendUnavailableError, NotFoundError
 from .graylog_api import GraylogApi
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    import httpx
 
 AGGREGATE_PATH = "/api/search/aggregate"
 # How a Search Scripting API without time grouping (e.g. Graylog 5.1) rejects it.

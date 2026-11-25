@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping
 from dataclasses import replace
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..domain.alerts import Event, EventDefinition, EventQuery, priority_label
 from ..domain.errors import BackendError, InvalidRequestError, error_payload
@@ -14,13 +13,17 @@ from ..domain.models import Between, JsonDict
 from ..domain.timeutil import format_timestamp, parse_timestamp
 from .pagination import listing, open_page, page_metadata, pinned_window
 from .policy import Clock, Limits, clamp, utc_now
-from .ports import AlertStore
-from .service import LogService
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
+
+    from .ports import AlertStore
+    from .service import LogService
 
 _EVENT_ID = re.compile(r"[0-9A-Za-z]+")  # Graylog event IDs are ULIDs
 
 
-def _seconds(ms):
+def _seconds(ms: int | None) -> int | None:
     return None if ms is None else round(ms / 1000)
 
 
@@ -161,7 +164,7 @@ class AlertService:
         # Without the definition's query, a search would return every message, not the matches.
         streams = (event.source_streams or definition.stream_ids) if definition else ()
         window = _matching_window(event, definition)
-        if not streams or window is None:
+        if definition is None or not streams or window is None:
             result["matching_messages"] = []
             result["note"] = (
                 "the definition, streams or time window is unknown, so no messages were "

@@ -2,12 +2,17 @@
 
 from __future__ import annotations
 
-from mcp.server.mcpserver import MCPServer
-from mcp.types import CallToolResult
+from typing import TYPE_CHECKING, Literal
 
-from ..application.service import LogService
-from .responses import Responder
+from mcp.types import CallToolResult  # noqa: TC002 - the MCP SDK reads tool annotations
+
 from .tool_annotations import READ_ONLY
+
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
+
+    from ..application.service import LogService
+    from .responses import Responder
 
 
 def register(server: MCPServer, service: LogService, respond: Responder) -> None:
@@ -36,9 +41,9 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         stream_id: str,
         range_seconds: int = 900,
         limit: int = 50,
-        fields: str = "",
+        fields: tuple[str, ...] = (),
         sort: str = "timestamp",
-        sort_order: str = "desc",
+        sort_order: Literal["asc", "desc"] = "desc",
         next_cursor: str = "",
     ) -> CallToolResult:
         """Search messages from the last N seconds.
@@ -52,9 +57,9 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
             stream_id: Required. Access is enforced per stream; get IDs from browse_streams.
             range_seconds: Look-back window (1 s to 30 days, default 15 min).
             limit: Maximum messages returned (1-1000).
-            fields: Optional comma-separated field names to return.
+            fields: Optional field names to return, e.g. ["source", "message"].
             sort: Field to sort on.
-            sort_order: 'asc' or 'desc'.
+            sort_order: Newest first (desc) or oldest first (asc).
             next_cursor: A previous response's next_cursor. Continues that exact request:
                 filters, time range and page size come from the cursor.
         """
@@ -78,9 +83,9 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         from_time: str,
         to_time: str,
         limit: int = 50,
-        fields: str = "",
+        fields: tuple[str, ...] = (),
         sort: str = "timestamp",
-        sort_order: str = "desc",
+        sort_order: Literal["asc", "desc"] = "desc",
         next_cursor: str = "",
     ) -> CallToolResult:
         """Search messages between two ISO-8601 timestamps
@@ -94,9 +99,9 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
             from_time: Window start.
             to_time: Window end.
             limit: Maximum messages returned (1-1000).
-            fields: Optional comma-separated field names to return.
+            fields: Optional field names to return, e.g. ["source", "message"].
             sort: Field to sort on.
-            sort_order: 'asc' or 'desc'.
+            sort_order: Newest first (desc) or oldest first (asc).
             next_cursor: A previous response's next_cursor. Continues that exact request:
                 filters, time range and page size come from the cursor.
         """
@@ -133,13 +138,15 @@ def register(server: MCPServer, service: LogService, respond: Responder) -> None
         )
 
     @server.tool(title="Read log message", annotations=READ_ONLY)
-    def read_log_message(index: str, message_id: str, fields: str = "") -> CallToolResult:
+    def read_log_message(
+        index: str, message_id: str, fields: tuple[str, ...] = ()
+    ) -> CallToolResult:
         """Fetch one message in full, using the _index and _id seen in search results.
 
         Args:
             index: The message's _index.
             message_id: The message's _id.
-            fields: Optional comma-separated field names to return.
+            fields: Optional field names to return, e.g. ["source", "message"].
         """
         return respond(lambda: service.message(index=index, message_id=message_id, fields=fields))
 

@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Capability(str, Enum):
+class Capability(StrEnum):
     AGGREGATION = "aggregation"  # Search Scripting API, Graylog 5.1+
     TIME_GROUPING = "time_grouping"  # Search Scripting grouped by time; not in 5.1
     FIELD_TYPES = "field_types"

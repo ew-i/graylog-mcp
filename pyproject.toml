@@ -1,22 +1,25 @@
 [build-system]
-requires = ["hatchling==1.32.4"]
+requires = ["hatchling==1.33.0"]
 build-backend = "hatchling.build"
 
 [project]
 name = "graylog-mcp"
-version = "1.11.0"
+version = "1.12.0"
 description = "Read-only Graylog search, analysis and health tools exposed over MCP"
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mcp==2.3.0",
     "httpx==0.28.1",
     "pydantic-settings==2.16.3",
+    "starlette==1.10.0",
     "uvicorn==0.54.0",
 ]
 
 [dependency-groups]
 dev = [
     "pytest==9.2.0",
+    "mypy==2.4.1",
     "pytest-cov==7.1.0",
     "genbadge[coverage]==1.1.3",
     "ruff==0.17.6",
@@ -35,19 +38,24 @@ pythonpath = ["src"]
 [tool.ruff]
 # PEP 8 allows teams to agree on up to 99 characters; tool docstrings benefit from it.
 line-length = 99
-target-version = "py310"
+target-version = "py311"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = [
-    "E", "W",   # pycodestyle: PEP 8 layout, whitespace, line length
-    "F",        # pyflakes: unused imports/variables, undefined names
-    "N",        # pep8-naming
-    "I",        # import order (PEP 8 import grouping)
-    "B",        # bugbear: likely bugs
-    "UP",       # modern syntax for the minimum Python version
-    "SIM",      # simplifications
-    "C4",       # comprehension style
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "N",    # pep8-naming
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "A",    # flake8-builtins
+    "C4",   # flake8-comprehensions
+    "SIM",  # flake8-simplify
+    "TCH",  # flake8-type-checking
+    "PTH",  # flake8-use-pathlib
+    "RUF",  # ruff-specific
 ]
 
 [tool.ruff.lint.isort]
@@ -55,3 +63,24 @@ known-first-party = ["graylog_mcp"]
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["graylog_mcp"]
+mypy_path = "src"
+strict = true
+warn_unreachable = true
+# Settings fields have defaults and come from the environment; plain mypy would
+# report every one as a required constructor argument.
+plugins = ["pydantic.mypy"]
+
+[tool.coverage.run]
+branch = true
+source = ["graylog_mcp"]
+# Protocols only, imported for type checking alone, so never executed.
+omit = ["*/graylog_mcp/application/ports.py"]
+
+[tool.coverage.report]
+fail_under = 100
+show_missing = true
+

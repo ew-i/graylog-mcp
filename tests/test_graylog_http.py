@@ -1,5 +1,6 @@
 import json
 import unittest
+from typing import Any, ClassVar
 from unittest.mock import patch
 
 import httpx
@@ -355,7 +356,7 @@ class ValidateQueryTest(unittest.TestCase):
 
 
 class SearchTest(unittest.TestCase):
-    body = {
+    body: ClassVar[dict[str, Any]] = {
         "total_results": 42,
         "messages": [{"message": {"msg": "a"}}, {"message": {"msg": "b"}}],
     }

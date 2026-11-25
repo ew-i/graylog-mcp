@@ -6,6 +6,7 @@ import unittest
 import httpx
 from starlette.testclient import TestClient
 
+from graylog_mcp import __version__
 from graylog_mcp.cli import wire
 from graylog_mcp.domain.errors import AccessDeniedError, BackendUnavailableError
 from graylog_mcp.infrastructure.config import Settings
@@ -18,7 +19,7 @@ from graylog_mcp.infrastructure.http_auth import (
     caller_token,
     protect,
 )
-from graylog_mcp.interface.mcp_tools import build_server
+from graylog_mcp.interface.mcp_tools import HEALTH_PATH, build_server
 from graylog_mcp.interface.redaction import Redactor
 
 SHARED_SECRET = "s" * 40
@@ -70,10 +71,10 @@ def http_app(mode: str, graylog: FakeGraylog):
     server = build_server(
         wire(client),
         redactor=Redactor(current_secret=caller_token if per_caller else lambda: None),
-        cache_scope=caller_scope if per_caller else lambda: "",
+        caller_id=caller_scope if per_caller else lambda: "",
     )
     app = server.streamable_http_app(transport_security=settings.transport_security_settings())
-    return protect(app, settings, client)
+    return protect(app, settings, client, public_paths=frozenset({HEALTH_PATH}))
 
 
 class McpClient:
@@ -229,6 +230,74 @@ class GraylogModeTest(unittest.TestCase):
         # Then
         self.assertEqual(response.status_code, 401)
         self.assertEqual(graylog.calls, [("/api/system", "unknown-token")])
+
+
+class HealthTest(unittest.TestCase):
+    def test_given_any_auth_mode_when_checking_health_then_answers_without_a_token(self):
+        for mode in ("none", "token", "graylog"):
+            with (
+                self.subTest(mode=mode),
+                TestClient(http_app(mode, FakeGraylog()), base_url="http://127.0.0.1:8000") as http,
+            ):
+                # When
+                health = http.get("/healthz")
+                mcp = http.post("/mcp", json={}, headers=ACCEPT)
+
+                # Then the health check is open, the MCP endpoint is not (outside none)
+                self.assertEqual(health.status_code, 200)
+                self.assertEqual(health.json(), {"status": "ok", "version": __version__})
+                if mode != "none":
+                    self.assertEqual(mcp.status_code, 401)
+
+
+class AuditLogTest(unittest.TestCase):
+    def test_given_tool_calls_when_served_then_each_is_logged_with_caller_arguments_and_outcome(
+        self,
+    ):
+        # Given two clients in graylog mode
+        graylog = FakeGraylog()
+        with TestClient(http_app("graylog", graylog), base_url="http://127.0.0.1:8000") as http:
+            alice, bob = McpClient(http, ALICE), McpClient(http, BOB)
+            alice.initialize()
+            bob.initialize()
+
+            # When
+            with self.assertLogs("graylog_mcp.audit", level="INFO") as logs:
+                alice.tool("cluster_status")
+                bob.result(
+                    "tools/call",
+                    {
+                        "name": "stream_rules",
+                        "arguments": {"stream_id": f"password={'p' * 20} " + "x" * 2000},
+                    },
+                )
+                bob.result("tools/call", {"name": "find_recent_logs", "arguments": {"query": 1}})
+
+        # Then
+        entries = [json.loads(line.partition("tool_call ")[2]) for line in logs.output]
+        ok, failed, invalid = entries
+        self.assertEqual((ok["tool"], ok["outcome"], ok["kind"]), ("cluster_status", "ok", None))
+        self.assertEqual((failed["outcome"], failed["kind"]), ("error", "NotFound"))
+        self.assertEqual((invalid["outcome"], invalid["kind"]), ("error", None))
+        self.assertTrue(all(isinstance(entry["ms"], int) for entry in entries))
+        # who: a stable, non-secret name per client
+        self.assertEqual(len(ok["caller"]), 12)
+        self.assertNotEqual(ok["caller"], failed["caller"])
+        self.assertEqual(failed["caller"], invalid["caller"])
+        self.assertNotIn(ALICE, "".join(logs.output))
+        # what: redacted and shortened
+        stream_id = failed["arguments"]["stream_id"]
+        self.assertNotIn("p" * 20, stream_id)
+        self.assertTrue(stream_id.endswith("chars]"))
+
+    def test_given_no_per_client_tokens_when_logging_then_the_caller_is_unknown(self):
+        with TestClient(http_app("token", FakeGraylog()), base_url="http://127.0.0.1:8000") as http:
+            client = McpClient(http, SHARED_SECRET)
+            client.initialize()
+            with self.assertLogs("graylog_mcp.audit", level="INFO") as logs:
+                client.tool("cluster_status")
+
+        self.assertIsNone(json.loads(logs.output[0].partition("tool_call ")[2])["caller"])
 
 
 class GraylogTokenVerifierTest(unittest.TestCase):

@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from ..domain.errors import InvalidRequestError
 from ..domain.models import LastSeconds
@@ -36,27 +36,27 @@ Clock = Callable[[], datetime]
 
 
 def utc_now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def clamp(value: int, low: int, high: int) -> int:
     return max(low, min(value, high))
 
 
-def parse_field_list(raw: str) -> tuple[str, ...]:
-    """'a, b,,c' -> ('a', 'b', 'c'); duplicates removed, order kept."""
+def parse_field_list(raw: str | Iterable[str]) -> tuple[str, ...]:
+    """'a, b,,c' or ['a', ' b', '', 'c'] -> ('a', 'b', 'c'); duplicates removed, order kept."""
     seen: dict[str, None] = {}
-    for part in raw.split(","):
-        name = part.strip()
+    for part in raw.split(",") if isinstance(raw, str) else raw:
+        name = str(part).strip()
         if name:
             seen.setdefault(name)
     return tuple(seen)
 
 
-def parse_percentiles(raw: str) -> tuple[float, ...]:
-    """'50, 90,99.9' -> (50.0, 90.0, 99.9); each must be in (0, 100]."""
+def parse_percentiles(raw: str | Iterable[float]) -> tuple[float, ...]:
+    """'50, 90,99.9' or [50, 90, 99.9] -> (50.0, 90.0, 99.9); each must be in (0, 100]."""
     values: list[float] = []
-    for part in parse_field_list(raw):
+    for part in parse_field_list(raw) if isinstance(raw, str) else raw:
         try:
             value = float(part)
         except ValueError:

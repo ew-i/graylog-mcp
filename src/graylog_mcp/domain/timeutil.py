@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from .errors import InvalidRequestError
 
@@ -17,11 +17,11 @@ def parse_timestamp(raw: str) -> datetime:
     except ValueError:
         raise InvalidRequestError(f"unrecognised timestamp {raw!r}") from None
     if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone(timezone.utc)
+        value = value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
 
 
 def format_timestamp(value: datetime) -> str:
-    """UTC ISO-8601 with millisecond precision, the format Graylog accepts in queries."""
-    utc = value.astimezone(timezone.utc)
+    """UTC ISO-8601 with millisecond precision."""
+    utc = value.astimezone(UTC)
     return utc.strftime("%Y-%m-%dT%H:%M:%S.") + f"{utc.microsecond // 1000:03d}Z"

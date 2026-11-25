@@ -1,5 +1,5 @@
 import unittest
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from graylog_mcp.application.analytics import AnalyticsService
 from graylog_mcp.application.policy import Limits
@@ -21,7 +21,7 @@ from graylog_mcp.domain.models import (
 
 from .fakes import FakeAggregationStore, FakeLogStore
 
-NOW = datetime(2026, 9, 25, 12, 0, 0, tzinfo=timezone.utc)
+NOW = datetime(2026, 9, 25, 12, 0, 0, tzinfo=UTC)
 
 
 def table(*rows):
@@ -312,6 +312,21 @@ class MessageContextTest(AnalyticsTestCase):
             return SearchPage(len(ids), entries, len(ids))
 
         self.logs.responder = respond
+
+    def test_given_neighbours_without_ids_when_reading_context_then_keeps_each_of_them(self):
+        # Given messages without an _id cannot be deduplicated, so none is dropped
+        def respond(query):
+            entries = tuple(LogEntry({"msg": f"{query.sort.direction.value}-{i}"}) for i in range(2))
+            return SearchPage(2, entries, 2)
+
+        self.logs.responder = respond
+
+        # When
+        result = self.service.message_context(index="idx", message_id="m0", stream_id="s1", before=2, after=2)
+
+        # Then
+        self.assertEqual([m["msg"] for m in result["before"]], ["desc-1", "desc-0"])
+        self.assertEqual([m["msg"] for m in result["after"]], ["asc-0", "asc-1"])
 
     def test_given_anchor_when_reading_context_then_returns_neighbours_ordered_deduplicated_and_scoped(self):
         # When

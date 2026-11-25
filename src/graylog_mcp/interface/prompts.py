@@ -6,12 +6,14 @@ backticks mark tool names and nothing else, so tests can check every name exists
 
 from __future__ import annotations
 
-from typing import Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any
 
-from mcp.server.mcpserver import MCPServer
 from pydantic import Field
 
 from .query_guide import QUERY_SYNTAX
+
+if TYPE_CHECKING:
+    from mcp.server.mcpserver import MCPServer
 
 _RULES = (
     "Rules: the tools are read-only. Do not guess field names; check them with "

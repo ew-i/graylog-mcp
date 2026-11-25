@@ -7,7 +7,7 @@ results are shaped for a caller. It knows nothing about HTTP or MCP.
 from __future__ import annotations
 
 from dataclasses import asdict
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ..domain.analysis import field_names, rank_values
 from ..domain.errors import InvalidRequestError, NotFoundError, UnsupportedError
@@ -25,7 +25,11 @@ from ..domain.models import (
 from .pagination import open_page, page_metadata, pinned_window
 from .policy import Clock, Limits, parse_field_list, utc_now
 from .policy import clamp as _clamp
-from .ports import LogStore
+
+if TYPE_CHECKING:
+    from collections.abc import Iterable
+
+    from .ports import LogStore
 
 __all__ = ["Limits", "LogService", "parse_field_list"]
 
@@ -62,7 +66,7 @@ class LogService:
         stream_id: str,
         seconds: int,
         limit: int,
-        fields: str = "",
+        fields: str | Iterable[str] = "",
         sort_field: str = "timestamp",
         sort_order: str = "desc",
         next_cursor: str = "",
@@ -80,7 +84,7 @@ class LogService:
         start: str,
         end: str,
         limit: int,
-        fields: str = "",
+        fields: str | Iterable[str] = "",
         sort_field: str = "timestamp",
         sort_order: str = "desc",
         next_cursor: str = "",
@@ -102,7 +106,7 @@ class LogService:
         text: str,
         stream_id: str,
         limit: int,
-        fields: str,
+        fields: str | Iterable[str],
         sort_field: str,
         sort_order: str,
         next_cursor: str,
@@ -163,7 +167,9 @@ class LogService:
 
     # -- single message ------------------------------------------------------
 
-    def message(self, *, index: str, message_id: str, fields: str = "") -> JsonDict:
+    def message(
+        self, *, index: str, message_id: str, fields: str | Iterable[str] = ""
+    ) -> JsonDict:
         if not index.strip() or not message_id.strip():
             raise InvalidRequestError("both index and message_id are required")
         entry = self._store.fetch(index.strip(), message_id.strip())
@@ -219,8 +225,6 @@ class LogService:
                 f"stream {query.stream_id!r} does not exist or this token cannot read it; "
                 "call browse_streams to find one"
             )
-        # Field types give capabilities but lag behind new fields (Graylog refreshes them
-        # periodically); the sample of recent messages catches fields not typed yet.
         page = self._store.search(query)
         try:
             typed = {
@@ -229,7 +233,7 @@ class LogService:
                 if not is_internal_field(f.name)
             }
             source = "field types"
-        except UnsupportedError:  # older servers: names from the sample only
+        except UnsupportedError:
             typed, source = {}, "message sample"
         untyped = [name for name in field_names(page.entries) if name not in typed]
         fields = [*typed.values(), *(FieldInfo(name, None, None, None) for name in untyped)]

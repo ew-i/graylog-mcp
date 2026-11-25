@@ -10,32 +10,33 @@ result's `next_offset`, so use cases never see the backend's paging style.
 
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from ..domain.aggregation import AggregationQuery, AggregationTable
-from ..domain.alerts import Event, EventDefinition, EventPage, EventQuery
-from ..domain.capabilities import Capability
-from ..domain.configuration import (
-    IndexSet,
-    LookupResult,
-    Pipeline,
-    PipelineConnection,
-    PipelineRule,
-    StreamConfig,
-)
-from ..domain.models import (
-    ClusterInfo,
-    FieldInfo,
-    ListingPage,
-    ListingQuery,
-    LogEntry,
-    LogQuery,
-    QueryValidation,
-    SearchPage,
-    TimeWindow,
-)
-from ..domain.operations import InputStatus, NodeStatus, NodeThroughput, SystemNotification
-from ..domain.views import SavedQuery
+if TYPE_CHECKING:
+    from ..domain.aggregation import AggregationQuery, AggregationTable
+    from ..domain.alerts import Event, EventDefinition, EventPage, EventQuery
+    from ..domain.capabilities import Capability
+    from ..domain.configuration import (
+        IndexSet,
+        LookupResult,
+        Pipeline,
+        PipelineConnection,
+        PipelineRule,
+        StreamConfig,
+    )
+    from ..domain.models import (
+        ClusterInfo,
+        FieldInfo,
+        ListingPage,
+        ListingQuery,
+        LogEntry,
+        LogQuery,
+        QueryValidation,
+        SearchPage,
+        TimeWindow,
+    )
+    from ..domain.operations import InputStatus, NodeStatus, NodeThroughput, SystemNotification
+    from ..domain.views import SavedQuery
 
 
 class StreamCatalog(Protocol):
